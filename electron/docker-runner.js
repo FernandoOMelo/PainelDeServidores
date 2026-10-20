@@ -161,18 +161,26 @@ class DockerRunner extends EventEmitter {
   /* ---------------- monitoramento ---------------- */
 
   /**
-   * Modo somente leitura: acompanha o container (estado, health, logs e
-   * metricas) sem nunca iniciar, parar ou reiniciar.
+   * Acompanha o container (estado, health, logs e metricas). Usado tanto no
+   * modo somente monitorar quanto em containers que o painel pode controlar
+   * - o container pode ter sido iniciado por fora (docker compose, outra
+   * maquina) e o painel precisa enxergar isso.
    */
-  observe() {
-    this.observed = true;
+  monitor() {
     this.#startMonitor();
     this.#startLogs();
     this.#startStats();
     this.#poll().catch(() => {});
   }
 
+  /** Modo somente leitura: acompanha sem nunca iniciar, parar ou reiniciar. */
+  observe() {
+    this.observed = true;
+    this.monitor();
+  }
+
   #startMonitor() {
+    if (this._monitorTimer) return;
     this.#stopMonitor();
     const interval = this.service.health?.intervalMs ?? 5000;
     this._monitorTimer = setInterval(() => {
@@ -242,6 +250,7 @@ class DockerRunner extends EventEmitter {
   }
 
   #startStats() {
+    if (this._statsTimer) return;
     this.#stopStats();
     const interval = Math.max(2000, this.service.health?.intervalMs ?? 5000);
     this._statsTimer = setInterval(() => {
@@ -309,6 +318,7 @@ class DockerRunner extends EventEmitter {
   /* ---------------- logs ---------------- */
 
   #startLogs() {
+    if (this._logProcess) return;
     this.#stopLogs();
 
     let child;

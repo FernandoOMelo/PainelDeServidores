@@ -3,6 +3,7 @@
 const { app, BrowserWindow, ipcMain, protocol, net, shell, Menu } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const { execFile } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 
 const { Store } = require('./store');
@@ -131,7 +132,7 @@ app.whenReady().then(() => {
   manager = new ServiceManager(store, { logDir: path.join(APP_ROOT, 'logs'), appRoot: APP_ROOT });
 
   registerProtocol();
-  registerIpc({ manager, store, listListeningPorts, isPortOpen });
+  registerIpc({ manager, store, listListeningPorts, isPortOpen, app });
 
   manager.on('state', (snapshot) => broadcast('svc:state', snapshot));
   manager.on('log', (payload) => broadcast('svc:log', payload));
