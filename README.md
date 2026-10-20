@@ -12,7 +12,9 @@ pela interface grafica, no lugar de varios terminais abertos.
 - **Node proprio por servico** - cada servico pode usar uma versao diferente do
   Node (node embutido no projeto, versao especifica do nvm, etc). A pasta do
   node entra no PATH do processo, entao `npm`, `npx` e os processos filhos usam
-  a mesma versao. O painel mostra a versao de cada servico no card.
+  a mesma versao. O painel mostra a versao de cada servico no card. O botao
+  **"Procurar na pasta"** localiza o `node.exe` embarcado no diretorio de
+  trabalho do servico e preenche o campo sozinho.
 - **Docker** - containers podem ser iniciados, parados e reiniciados pelo
   painel, com estado real, HEALTHCHECK, logs ao vivo e metricas de CPU/memoria.
 - **Health check** - verificacao por porta TCP ou por endpoint HTTP (com status
@@ -123,7 +125,9 @@ Formato de um servico Docker:
   permite rodar versoes diferentes ao mesmo tempo.
 - `container`: nome do container alvo quando `type` e `docker`.
 - `health.type`: `none`, `tcp` (porta aberta) ou `http` (endpoint com status esperado).
-  Em containers, o status vem do `HEALTHCHECK` proprio do Docker.
+  Em containers, o status vem do `HEALTHCHECK` proprio do Docker. O health check
+  tambem informa **quem responde na porta** (processo e pid), o que evita o
+  falso positivo de outro servico estar ocupando a mesma porta.
 - `restart.enabled`: reinicia o processo quando ele cai, com backoff exponencial.
   Em containers, o container e reiniciado quando sai com codigo de erro.
 - `restart.restartOnUnhealthy`: tambem reinicia quando o health check falha
