@@ -116,9 +116,74 @@ function detectSystemNodeVersion() {
   return detectNodeVersion(process.execPath);
 }
 
+/**
+ * Procura um node "embutido" dentro da pasta de um projeto.
+ * Cobre os formatos mais comuns de distribuicao portavel (node/node.exe,
+ * nodejs/bin/node.exe, runtime/node/node.exe...) e faz uma varredura rasa
+ * de subpastas, que e onde costuma ficar.
+ */
+function findEmbeddedNodes(cwd) {
+  const found = [];
+  const seen = new Set();
+
+  const consider = (exe) => {
+    if (!exe) return;
+    const key = path.resolve(exe).toLowerCase();
+    if (seen.has(key)) return;
+    try {
+      if (!fs.statSync(exe).isFile()) return;
+    } catch {
+      return;
+    }
+    seen.add(key);
+    found.push(exe);
+  };
+
+  const root = path.resolve(cwd || '.');
+  consider(path.join(root, 'node.exe'));
+
+  for (const dir of EMBEDDED_NODE_DIRS) {
+    consider(path.join(root, dir, 'node.exe'));
+  }
+
+  // Varredura rasa das subpastas imediatas do projeto.
+  try {
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const sub = path.join(root, entry.name);
+      consider(path.join(sub, 'node.exe'));
+      consider(path.join(sub, 'node', 'node.exe'));
+      consider(path.join(sub, 'nodejs', 'node.exe'));
+      consider(path.join(sub, 'bin', 'node.exe'));
+      consider(path.join(sub, 'runtime', 'node', 'node.exe'));
+    }
+  } catch {
+    /* pasta inacessivel */
+  }
+
+  return found;
+}
+
+/** Pasta onde ficam os node.exe embarcados em projetos. */
+const EMBEDDED_NODE_DIRS = [
+  'node',
+  'nodejs',
+  '.node',
+  'node-runtime',
+  'nodejs/bin',
+  'node/bin',
+  'vendor/node',
+  'vendor/nodejs',
+  'runtime/node',
+  'runtime/nodejs',
+  'runtime/.node',
+  'bin',
+];
+
 module.exports = {
   resolveExecution,
   resolveNodeExecutable,
   detectNodeVersion,
   detectSystemNodeVersion,
+  findEmbeddedNodes,
 };

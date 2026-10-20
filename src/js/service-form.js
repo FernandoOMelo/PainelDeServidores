@@ -98,6 +98,12 @@ export function openServiceForm(service, onSubmit) {
     spellcheck: false,
   });
   const nodeVersionHint = el('div', { class: 'hint' });
+  const nodeList = el('div', { class: 'node-list' });
+  const discoverBtn = el('button', {
+    class: 'btn',
+    text: 'Procurar na pasta',
+    title: 'Procura um node.exe embarcado dentro do diretorio de trabalho do servico',
+  });
 
   const shellCheck = checkbox('Executar atraves do shell do sistema', data.shell);
   const autostartCheck = checkbox('Iniciar automaticamente ao abrir o app', data.autostart);
@@ -133,16 +139,82 @@ export function openServiceForm(service, onSubmit) {
     nodeTimer = setTimeout(detectNode, 400);
   });
 
+  /** Preenche o campo com um node encontrado e valida a versao. */
+  const applyNode = (exePath) => {
+    nodePathInput.value = exePath;
+    nodeList.replaceChildren();
+    detectNode();
+  };
+
+  /** Procura node embarcado no diretorio de trabalho do servico. */
+  const runDiscover = async () => {
+    const cwd = cwdInput.value.trim();
+    if (!cwd) {
+      nodeVersionHint.textContent = 'Informe o diretorio de trabalho antes de procurar.';
+      nodeVersionHint.style.color = 'var(--warn)';
+      cwdInput.focus();
+      return;
+    }
+
+    discoverBtn.disabled = true;
+    discoverBtn.textContent = 'Procurando...';
+    nodeVersionHint.style.color = '';
+    nodeVersionHint.textContent = '';
+
+    try {
+      const found = await api.node.discover(cwd);
+
+      if (!found.length) {
+        nodeList.replaceChildren();
+        nodeVersionHint.textContent = `Nenhum node.exe encontrado em ${cwd}.`;
+        nodeVersionHint.style.color = 'var(--warn)';
+        return;
+      }
+
+      if (found.length === 1) {
+        applyNode(found[0].path);
+        return;
+      }
+
+      nodeVersionHint.textContent = `${found.length} node(s) encontrado(s) - escolha qual usar:`;
+      nodeList.replaceChildren(
+        ...found.map((candidate) =>
+          el('button', {
+            class: 'node-option',
+            type: 'button',
+            onClick: () => applyNode(candidate.path),
+          }, [
+            el('span', { class: 'node-ver', text: candidate.version || '?' }),
+            el('span', { class: 'node-path', text: candidate.path }),
+            candidate.npm ? el('span', { class: 'tag', text: 'com npm' }) : null,
+          ])
+        )
+      );
+    } catch (err) {
+      nodeVersionHint.textContent = `Falha ao procurar: ${err.message}`;
+      nodeVersionHint.style.color = 'var(--danger)';
+    } finally {
+      discoverBtn.disabled = false;
+      discoverBtn.textContent = 'Procurar na pasta';
+    }
+  };
+
+  discoverBtn.addEventListener('click', runDiscover);
+
   const processSection = el('div', {}, [
     field('Comando', commandInput, 'Executavel a ser chamado (ex.: npm, node, python, dotnet).'),
     field('Argumentos', argsInput, 'Separados por espaco. Use aspas para argumentos com espaco.'),
     field('Diretorio de trabalho', cwdInput, 'Onde o comando sera executado. Vazio usa a pasta do app.'),
     field(
       'Node do servico',
-      nodePathInput,
+      el('div', { class: 'row' }, [
+        el('div', { style: 'flex:1' }, [nodePathInput]),
+        discoverBtn,
+      ]),
       'Caminho do node.exe (ou da pasta que o contem) quando este servico usa uma versao propria.'
     ),
     nodeVersionHint,
+    nodeList,
     field('Variaveis de ambiente', envInput, 'Uma por linha, no formato CHAVE=VALOR.'),
     el('div', { class: 'checks' }, [shellCheck, autostartCheck, monitorOnlyCheck]),
   ]);

@@ -1,6 +1,7 @@
 'use strict';
 
 const path = require('node:path');
+const fs = require('node:fs');
 const { EventEmitter } = require('node:events');
 const { ServiceRunner, STATES } = require('./service-runner');
 const { DockerRunner } = require('./docker-runner');
@@ -8,7 +9,7 @@ const { DockerClient } = require('./docker');
 const { HealthMonitor } = require('./health-checker');
 const { MetricsCollector } = require('./metrics');
 const { normalizeService } = require('./store');
-const { detectNodeVersion, resolveNodeExecutable } = require('./executables');
+const { detectNodeVersion, resolveNodeExecutable, findEmbeddedNodes } = require('./executables');
 
 /**
  * Orquestrador: mantem os servicos registrados, Their runners, monitores
@@ -322,6 +323,26 @@ class ServiceManager extends EventEmitter {
     const resolved = resolveNodeExecutable(nodePath, this.appRoot);
     if (!resolved) return null;
     return detectNodeVersion(resolved);
+  }
+
+  /**
+   * Procura node embarcado na pasta do servico, para o cadastro nao exigir
+   * que o caminho do node.exe seja digitado a mao.
+   */
+  async discoverNodes(cwd) {
+    const root = cwd ? path.resolve(this.appRoot, cwd) : this.appRoot;
+    const candidates = findEmbeddedNodes(root);
+
+    const results = [];
+    for (const exe of candidates) {
+      const version = await detectNodeVersion(exe);
+      results.push({
+        path: exe,
+        version,
+        npm: fs.existsSync(path.join(path.dirname(exe), 'npm.cmd')),
+      });
+    }
+    return results;
   }
 
   dispose() {

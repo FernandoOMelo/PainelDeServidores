@@ -15,6 +15,7 @@ const { execFile, spawn } = require('node:child_process');
 
 const { Store } = require('../electron/store');
 const { ServiceManager } = require('../electron/service-manager');
+const { findEmbeddedNodes } = require('../electron/executables');
 
 const PORT = 45999;
 const EXTERNAL_PORT = 45998;
@@ -163,6 +164,31 @@ async function main() {
     const state = manager.getState()[customNode.id];
     assert.ok(state.nodeVersion, 'nodeVersion nao informado');
     assert.ok(state.nodeVersion.startsWith('v'), `versao inesperada: ${state.nodeVersion}`);
+  });
+
+  // Descoberta de node embarcado na pasta do projeto.
+  const fakeProject = path.join(tmp, 'projeto');
+  fs.mkdirSync(path.join(fakeProject, 'node'), { recursive: true });
+  fs.writeFileSync(path.join(fakeProject, 'node', 'node.exe'), '');
+  fs.mkdirSync(path.join(fakeProject, 'runtime', 'nodejs'), { recursive: true });
+  fs.writeFileSync(path.join(fakeProject, 'runtime', 'nodejs', 'node.exe'), '');
+
+  const embedded = findEmbeddedNodes(fakeProject);
+  check('node embarcado encontrado na pasta do projeto', () => {
+    assert.ok(embedded.length >= 1, 'nenhum node embarcado encontrado');
+    assert.ok(
+      embedded.some((exe) => exe.endsWith(path.join('node', 'node.exe'))),
+      `esperado node/node.exe, veio: ${embedded.join(', ')}`
+    );
+  });
+  check('node embarcado tambem encontrado em subdiretórios', () => {
+    assert.ok(
+      embedded.some((exe) => exe.includes(path.join('runtime', 'nodejs'))),
+      `esperado runtime/nodejs/node.exe, veio: ${embedded.join(', ')}`
+    );
+  });
+  check('pasta sem node embarcado devolve lista vazia', () => {
+    assert.strictEqual(findEmbeddedNodes(path.join(tmp, 'vazio-inexistente')).length, 0);
   });
   await manager.stop(customNode.id);
   await waitFor(() => manager.getState()[customNode.id]?.state === 'stopped', 8000, 'node customizado parado');

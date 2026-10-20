@@ -48,6 +48,7 @@ function registerIpc({ manager, store, listListeningPorts, isPortOpen }) {
   handle('docker:containers', () => manager.listContainers());
 
   handle('node:version', (nodePath) => manager.detectNodeVersion(nodePath));
+  handle('node:discover', (cwd) => manager.discoverNodes(cwd));
 }
 
 module.exports = { registerIpc };

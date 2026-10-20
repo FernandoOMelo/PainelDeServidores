@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   node: {
     version: (nodePath) => invoke('node:version', nodePath),
+    discover: (cwd) => invoke('node:discover', cwd),
   },
   on: {
     state: (cb) => subscribe('svc:state', cb),
