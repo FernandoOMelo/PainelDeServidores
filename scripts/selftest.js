@@ -16,6 +16,7 @@ const { execFile, spawn } = require('node:child_process');
 const { Store } = require('../electron/store');
 const { ServiceManager } = require('../electron/service-manager');
 const { findEmbeddedNodes } = require('../electron/executables');
+const { WindowsServiceClient } = require('../electron/windows-service');
 
 const PORT = 45999;
 const EXTERNAL_PORT = 45998;
@@ -351,6 +352,67 @@ async function main() {
   });
 
   manager.remove(watched.id);
+
+  console.log('\n== 11. Servicos do Windows ==');
+  if (process.platform !== 'win32') {
+    console.log('   (ignorado: so Windows)');
+  } else {
+    const client = new WindowsServiceClient();
+    const all = await client.list();
+    check('lista de servicos do Windows obtida', () => {
+      assert.ok(Array.isArray(all), 'lista invalida');
+      assert.ok(all.length > 0, 'nenhum servico encontrado');
+    });
+
+    const running = all.find((s) => s.state === 'Running' && s.pid);
+    if (running) {
+      const t = Date.now();
+      const info = await client.get(running.name);
+      check('estado e PID de um servico em execucao', () => {
+        assert.ok(info, `servico ${running.name} nao encontrado`);
+        assert.strictEqual(info.state, 'Running');
+        assert.ok(info.pid > 0, 'pid nao informado');
+      });
+      console.log(`   (consulta em ${Date.now() - t}ms)`);
+
+      // Monitora sem controlar: o painel nao pode agir sobre o servico.
+      const watchedService = manager.create({
+        name: `Servico ${running.name}`,
+        type: 'servico',
+        service: running.name,
+        monitorOnly: true,
+      });
+      await waitFor(
+        () => manager.getState()[watchedService.id]?.state === 'running',
+        15000,
+        'servico do windows detectado em execucao'
+      );
+      check('painel detectou o servico do Windows em execucao', () => {
+        const state = manager.getState()[watchedService.id];
+        assert.strictEqual(state.state, 'running');
+        assert.strictEqual(state.serviceState, 'Running');
+        assert.ok(state.pid > 0, 'pid do servico nao informado');
+      });
+      manager.remove(watchedService.id);
+    } else {
+      console.log('   (nenhum servico em execucao para monitorar)');
+    }
+
+    // Sem permissao de administracao, o SCM recusa. O app precisa dizer isso
+    // com clareza em vez de falhar de forma obscura.
+    const stopped = all.find((s) => s.state !== 'Running');
+    if (stopped) {
+      const result = await client.stop(stopped.name);
+      check('tentativa de parar sem permissao retorna erro claro', () => {
+        assert.strictEqual(result.ok, false);
+        assert.ok(result.error, 'sem mensagem de erro');
+        assert.ok(
+          result.needsElevation || result.code === 1062,
+          `esperado necessidade de elevacao ou servico parado, veio codigo ${result.code}`
+        );
+      });
+    }
+  }
 
   manager.dispose();
   fs.rmSync(tmp, { recursive: true, force: true });

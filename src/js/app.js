@@ -133,6 +133,7 @@ function paintCard(service) {
   const runtime = state.runtime[service.id] || { state: 'stopped' };
   const status = runtime.state || 'stopped';
   const isDocker = service.type === 'docker';
+  const isService = service.type === 'servico';
 
   refs.node.dataset.status = status;
   refs.node.classList.toggle('selected', state.selectedId === service.id);
@@ -152,6 +153,14 @@ function paintCard(service) {
       .map((p) => p.published)
       .join(', ');
     refs.portValue.textContent = published || '--';
+  } else if (isService) {
+    refs.cmd.textContent = `servico: ${service.service}`;
+    refs.cmd.title = refs.cmd.title || runtime.path || refs.cmd.textContent;
+    refs.runtimeTag.textContent = runtime.startMode || 'servico';
+    refs.runtimeTag.title = runtime.path || '';
+    refs.pidLabel.textContent = 'Estado';
+    refs.pidValue.textContent = runtime.serviceState || '--';
+    refs.portValue.textContent = service.health?.port ? service.health.port : '--';
   } else {
     const parts = [service.command, ...(service.args || [])].filter(Boolean);
     refs.cmd.textContent = parts.length ? parts.join(' ') : '(somente monitorar)';
@@ -177,16 +186,23 @@ function paintCard(service) {
 
   if (isDocker) {
     refs.healthText.textContent = HEALTH_LABELS[health] || health;
+  } else if (isService && service.health?.type === 'none') {
+    // Sem health check, a saude vem do estado do servico no Windows.
+    refs.healthText.textContent = HEALTH_LABELS[health] || health;
   } else if (service.health?.type === 'none') {
     refs.healthText.textContent = 'sem verificacao';
   } else {
     // Mostra quem responde na porta: evita o falso positivo de outra
     // aplicacao estar ocupando a mesma porta.
     const who = owner ? ` · ${owner}` : '';
-    refs.healthText.textContent = `${HEALTH_LABELS[health] || health}${latency}${who}`;
-    refs.healthText.title = owner
-      ? `Responde na porta ${service.health.port}: ${detail.owner.process} (pid ${detail.owner.pid})`
-      : '';
+    const label =
+      health === 'unknown' ? 'verificando' : HEALTH_LABELS[health] || health;
+    refs.healthText.textContent = `${label}${latency}${who}`;
+    refs.healthText.title = detail.error
+      ? `Ultimo erro: ${detail.error}`
+      : owner
+        ? `Responde na porta ${service.health.port}: ${detail.owner.process} (pid ${detail.owner.pid})`
+        : '';
   }
 
   // Servico somente monitorar: o painel mostra o estado real, mas nao controla.
@@ -410,7 +426,26 @@ api.on.health((payload) => {
 api.on.log(({ id, entries }) => logPanel.append(id, entries));
 
 api.on.notice((notice) => {
-  toast({ title: notice.title, message: notice.message, level: notice.level });
+  const options = {
+    title: notice.title || 'Aviso',
+    message: notice.message,
+    level: notice.level,
+  };
+
+  // Falhou por falta de permissao no Service Control Manager: oferecer
+  // reiniciar o painel como administrador.
+  if (notice.needsElevation) {
+    options.timeout = 15000;
+    options.action = {
+      label: 'Reiniciar como administrador',
+      onClick: () => {
+        toast({ title: 'Painel', message: 'Reabrindo com permissao de administrador...', level: 'info' });
+        api.app.relaunchElevated().catch(reportError);
+      },
+    };
+  }
+
+  toast(options);
 });
 
 api.on.list((services) => {

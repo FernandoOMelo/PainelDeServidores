@@ -63,6 +63,7 @@ export function openServiceForm(service, onSubmit) {
     [
       { value: 'processo', label: 'Processo local (node, python, dotnet...)' },
       { value: 'docker', label: 'Container Docker' },
+      { value: 'servico', label: 'Servico do Windows' },
     ],
     data.type
   );
@@ -266,6 +267,61 @@ export function openServiceForm(service, onSubmit) {
   };
 
   /* ---------------------------------------------------------------- */
+  /* Servico do Windows                                                 */
+  /* ---------------------------------------------------------------- */
+
+  const serviceInput = input({
+    value: data.service || '',
+    placeholder: 'galileo_one_api',
+    class: 'mono',
+    spellcheck: false,
+    list: 'servico-list',
+  });
+  const serviceList = el('datalist', { id: 'servico-list' });
+  const serviceStatus = el('div', { class: 'hint' });
+  const serviceAutostartCheck = checkbox('Iniciar automaticamente ao abrir o app', data.autostart);
+  const serviceMonitorOnlyCheck = checkbox('Somente monitorar (nao iniciar/parar este servico)', data.monitorOnly);
+
+  const serviceSection = el('div', {}, [
+    field('Servico do Windows', serviceInput, 'Nome do servico (como aparece em services.msc).'),
+    serviceList,
+    serviceStatus,
+    el('div', { class: 'checks' }, [serviceAutostartCheck, serviceMonitorOnlyCheck]),
+  ]);
+
+  let windowsServices = [];
+  const loadWindowsServices = async () => {
+    try {
+      windowsServices = await api.servico.list();
+      const running = windowsServices.filter((s) => s.state === 'Running').length;
+      serviceList.replaceChildren(
+        ...windowsServices.map((s) =>
+          el('option', {
+            value: s.name,
+            label: `${s.displayName} - ${s.state}${s.pid ? ` (pid ${s.pid})` : ''}`,
+          })
+        )
+      );
+      serviceStatus.textContent = `${windowsServices.length} servicos encontrados (${running} em execucao).`;
+      serviceStatus.style.color = 'var(--text-faint)';
+    } catch (err) {
+      serviceStatus.textContent = `Falha ao listar servicos: ${err.message}`;
+      serviceStatus.style.color = 'var(--danger)';
+    }
+  };
+
+  // Ao escolher um servico, mostra o estado atual dele.
+  serviceInput.addEventListener('change', () => {
+    const found = windowsServices.find((s) => s.name === serviceInput.value.trim());
+    if (found) {
+      serviceStatus.textContent = `${found.displayName} | ${found.state} | inicializacao: ${found.startMode}${
+        found.pid ? ` | pid ${found.pid}` : ''
+      }`;
+      serviceStatus.style.color = 'var(--text-faint)';
+    }
+  });
+
+  /* ---------------------------------------------------------------- */
   /* Health check e recuperacao                                        */
   /* ---------------------------------------------------------------- */
 
@@ -339,17 +395,29 @@ export function openServiceForm(service, onSubmit) {
     text: 'Containers usam o HEALTHCHECK proprio do Docker. O painel mostra o status e reinicia o container se ele sair com erro.',
   });
 
+  const serviceHealthNote = el('div', {
+    class: 'hint',
+    text: 'Sem verificacao de saude, o status vem do proprio servico do Windows. Para iniciar ou parar um servico e preciso rodar o painel como administrador.',
+  });
+
   /* ---------------------------------------------------------------- */
   /* Montagem                                                         */
   /* ---------------------------------------------------------------- */
 
   const toggleType = () => {
-    const isDocker = typeSelect.value === 'docker';
-    processSection.classList.toggle('fieldset-hidden', isDocker);
+    const type = typeSelect.value;
+    const isDocker = type === 'docker';
+    const isService = type === 'servico';
+
+    processSection.classList.toggle('fieldset-hidden', isDocker || isService);
     dockerSection.classList.toggle('fieldset-hidden', !isDocker);
+    serviceSection.classList.toggle('fieldset-hidden', !isService);
     healthSection.classList.toggle('fieldset-hidden', isDocker);
     dockerHealthNote.classList.toggle('fieldset-hidden', !isDocker);
+    serviceHealthNote.classList.toggle('fieldset-hidden', !isService);
+
     if (isDocker) loadContainers();
+    if (isService) loadWindowsServices();
   };
   typeSelect.addEventListener('change', toggleType);
 
@@ -360,8 +428,10 @@ export function openServiceForm(service, onSubmit) {
     field('Tipo de servico', typeSelect),
     processSection,
     dockerSection,
+    serviceSection,
     healthSection,
     dockerHealthNote,
+    serviceHealthNote,
 
     el('div', { class: 'section' }, [
       el('div', { class: 'section-title', text: 'Recuperacao automatica' }),
@@ -381,6 +451,7 @@ export function openServiceForm(service, onSubmit) {
     const name = nameInput.value.trim();
     const type = typeSelect.value;
     const isDocker = type === 'docker';
+    const isService = type === 'servico';
 
     if (!name) {
       errorText.textContent = 'Informe um nome para o servico.';
@@ -394,7 +465,13 @@ export function openServiceForm(service, onSubmit) {
       return;
     }
 
-    if (!isDocker && !commandInput.value.trim()) {
+    if (isService && !serviceInput.value.trim()) {
+      errorText.textContent = 'Selecione o servico do Windows.';
+      serviceInput.focus();
+      return;
+    }
+
+    if (!isDocker && !isService && !commandInput.value.trim()) {
       errorText.textContent = 'Informe o comando que inicia o servico.';
       commandInput.focus();
       return;
@@ -418,15 +495,20 @@ export function openServiceForm(service, onSubmit) {
       name,
       group: groupInput.value.trim() || 'Geral',
       type,
-      command: isDocker ? '' : commandInput.value.trim(),
-      args: isDocker ? [] : splitArgs(argsInput.value),
-      cwd: isDocker ? '' : cwdInput.value.trim(),
-      env: isDocker ? {} : parseEnv(envInput.value),
-      shell: isDocker ? false : shellCheck.querySelector('input').checked,
-      autostart: (isDocker ? dockerAutostartCheck : autostartCheck).querySelector('input').checked,
-      monitorOnly: (isDocker ? dockerMonitorOnlyCheck : monitorOnlyCheck).querySelector('input').checked,
-      nodePath: isDocker ? '' : nodePathInput.value.trim(),
+      command: isDocker || isService ? '' : commandInput.value.trim(),
+      args: isDocker || isService ? [] : splitArgs(argsInput.value),
+      cwd: isDocker || isService ? '' : cwdInput.value.trim(),
+      env: isDocker || isService ? {} : parseEnv(envInput.value),
+      shell: isDocker || isService ? false : shellCheck.querySelector('input').checked,
+      autostart: (
+        isDocker ? dockerAutostartCheck : isService ? serviceAutostartCheck : autostartCheck
+      ).querySelector('input').checked,
+      monitorOnly: (
+        isDocker ? dockerMonitorOnlyCheck : isService ? serviceMonitorOnlyCheck : monitorOnlyCheck
+      ).querySelector('input').checked,
+      nodePath: isDocker || isService ? '' : nodePathInput.value.trim(),
       container: isDocker ? containerInput.value.trim() : '',
+      service: isService ? serviceInput.value.trim() : '',
       health: {
         type: isDocker ? 'none' : healthType.value,
         port: isDocker || healthType.value === 'none' ? null : Number(portInput.value),

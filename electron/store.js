@@ -108,7 +108,7 @@ function normalizeService(input) {
   const command = String(input.command || '').trim();
   const cwd = String(input.cwd || '').trim();
 
-  const type = input.type === 'docker' ? 'docker' : 'processo';
+  const type = ['processo', 'docker', 'servico'].includes(input.type) ? input.type : 'processo';
 
   const health = { ...DEFAULT_HEALTH, ...(input.health || {}) };
   health.type = ['none', 'tcp', 'http'].includes(health.type) ? health.type : 'none';
@@ -157,6 +157,8 @@ function normalizeService(input) {
     nodePath: String(input.nodePath || '').trim(),
     // Container alvo quando type = 'docker'.
     container: String(input.container || '').trim(),
+    // Nome do servico do Windows quando type = 'servico'.
+    service: String(input.service || '').trim(),
     health,
     restart,
     createdAt: input.createdAt || new Date().toISOString(),

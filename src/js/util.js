@@ -103,6 +103,7 @@ export const STATE_LABELS = {
   stopping: 'Parando',
   backoff: 'Reiniciando',
   crashed: 'Erro',
+  paused: 'Pausado',
 };
 
 export const HEALTH_LABELS = {

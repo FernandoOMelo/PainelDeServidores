@@ -2,11 +2,25 @@ import { el } from './util.js';
 
 const root = () => document.getElementById('toast-root');
 
-export function toast({ title, message, level = 'info', timeout = 4200 }) {
+export function toast({ title, message, level = 'info', timeout = 4200, action }) {
   const node = el('div', { class: `toast ${level}` }, [
     el('h4', { text: title }),
     message ? el('p', { text: message }) : null,
   ]);
+
+  if (action) {
+    node.append(
+      el('button', {
+        class: 'btn btn-primary',
+        text: action.label,
+        onClick: () => {
+          node.remove();
+          action.onClick?.();
+        },
+      })
+    );
+  }
+
   root().append(node);
   setTimeout(() => {
     node.style.transition = 'opacity .2s ease, transform .2s ease';

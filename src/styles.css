@@ -394,6 +394,9 @@ body {
 .card[data-status="crashed"]::before {
   background: var(--danger);
 }
+.card[data-status="paused"]::before {
+  background: #8b5cf6;
+}
 .card[data-status="stopping"]::before {
   background: var(--warn);
 }
@@ -438,6 +441,10 @@ body {
 .dot.crashed {
   background: var(--danger);
   box-shadow: 0 0 0 3px var(--danger-dim);
+}
+.dot.paused {
+  background: #8b5cf6;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.18);
 }
 
 @keyframes pulse {
@@ -515,6 +522,10 @@ body {
 .badge.stopping {
   background: var(--warn-dim);
   color: #fcd34d;
+}
+.badge.paused {
+  background: rgba(139, 92, 246, 0.18);
+  color: #c4b5fd;
 }
 .badge.crashed {
   background: var(--danger-dim);

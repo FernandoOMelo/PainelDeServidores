@@ -17,6 +17,11 @@ pela interface grafica, no lugar de varios terminais abertos.
   trabalho do servico e preenche o campo sozinho.
 - **Docker** - containers podem ser iniciados, parados e reiniciados pelo
   painel, com estado real, HEALTHCHECK, logs ao vivo e metricas de CPU/memoria.
+- **Servicos do Windows** - servicos registrados no Windows (Service Control
+  Manager) podem ser acompanhados e controlados pelo painel, com estado real
+  (incluindo *Paused*), PID, modo de inicializacao e metricas. O painel
+  detecta que a conta precisa de permissao e oferece reiniciar-se como
+  administrador.
 - **Health check** - verificacao por porta TCP ou por endpoint HTTP (com status
   esperado, intervalo, timeout e janela de espera apos o start).
 - **Recuperacao automatica** - quando o processo cai, o painel reinicia com
@@ -48,7 +53,8 @@ edicao/remocao de servicos, node customizado (inclusive duas versoes rodando
 em paralelo) e o ciclo de vida de containers Docker.
 
 A parte de Docker exige a CLI do Docker e o daemon em execucao. Sem eles, o
-teste de container e ignorado e os demais continuam valendo.
+teste de container e ignorado e os demais continuam valendo. A parte de
+servicos do Windows so roda no Windows.
 
 ## Configuracao dos servicos
 
@@ -118,12 +124,14 @@ Formato de um servico Docker:
 }
 ```
 
-- `type`: `processo` (padrao) ou `docker`.
+- `type`: `processo` (padrao), `docker` ou `servico`.
 - `nodePath`: caminho do `node.exe` (ou da pasta que o contem) especifico do
   servico. Vazio usa o node do PATH. A pasta do node e placed no PATH do
   processo, de modo que `npm`, `npx` e os filhos usam a mesma versao - e o que
   permite rodar versoes diferentes ao mesmo tempo.
 - `container`: nome do container alvo quando `type` e `docker`.
+- `service`: nome do servico do Windows quando `type` e `servico` (o mesmo
+  nome que aparece em `services.msc`).
 - `health.type`: `none`, `tcp` (porta aberta) ou `http` (endpoint com status esperado).
   Em containers, o status vem do `HEALTHCHECK` proprio do Docker. O health check
   tambem informa **quem responde na porta** (processo e pid), o que evita o
@@ -153,6 +161,8 @@ electron/
   executables.js      resolucao do node customizado e deteccao de versao
   docker.js           cliente da CLI do Docker
   docker-runner.js    ciclo de vida de containers (start/stop/logs/metricas)
+  windows-service.js  cliente do Service Control Manager do Windows
+  windows-service-runner.js  ciclo de vida de servicos do Windows
   health-checker.js   verificacoes TCP/HTTP
   metrics.js          coletor de CPU/memoria por processo
   discovery.js        varredura de portas em escuta

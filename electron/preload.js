@@ -40,6 +40,13 @@ contextBridge.exposeInMainWorld('api', {
     status: () => invoke('docker:status'),
     containers: () => invoke('docker:containers'),
   },
+  servico: {
+    list: () => invoke('servico:list'),
+  },
+  app: {
+    relaunchElevated: () => invoke('app:relaunch-elevated'),
+    isElevated: () => invoke('app:is-elevated'),
+  },
   node: {
     version: (nodePath) => invoke('node:version', nodePath),
     discover: (cwd) => invoke('node:discover', cwd),

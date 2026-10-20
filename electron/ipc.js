@@ -1,12 +1,45 @@
 'use strict';
 
 const { ipcMain, BrowserWindow } = require('electron');
+const { execFile } = require('node:child_process');
+
+/**
+ * O processo esta rodando com token elevado (administrador de verdade)?
+ * Uma conta do grupo Administradores com token filtrado pelo UAC devolve
+ * false aqui - e e exatamente o caso em que iniciar/parar servico do
+ * Windows falha com "Acesso negado".
+ */
+let elevatedCache = null;
+function isElevated() {
+  if (elevatedCache !== null) return elevatedCache;
+  const script = [
+    '([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent())',
+    '.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)',
+  ].join('');
+
+  return new Promise((resolve) => {
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
+      { windowsHide: true, timeout: 10000 },
+      (err, stdout) => {
+        if (err) {
+          elevatedCache = false;
+          resolve(false);
+          return;
+        }
+        elevatedCache = String(stdout).trim().toLowerCase() === 'true';
+        resolve(elevatedCache);
+      }
+    );
+  });
+}
 
 /**
  * Registra os handlers IPC. Toda a comunicacao renderer -> main passa por
  * aqui; o renderer nunca tem acesso direto ao Node.
  */
-function registerIpc({ manager, store, listListeningPorts, isPortOpen }) {
+function registerIpc({ manager, store, listListeningPorts, isPortOpen, app }) {
   const handle = (channel, fn) => {
     ipcMain.handle(channel, async (_event, ...args) => {
       try {
@@ -47,8 +80,34 @@ function registerIpc({ manager, store, listListeningPorts, isPortOpen }) {
   handle('docker:status', () => manager.docker.availability());
   handle('docker:containers', () => manager.listContainers());
 
+  handle('servico:list', () => manager.listWindowsServices());
+
   handle('node:version', (nodePath) => manager.detectNodeVersion(nodePath));
   handle('node:discover', (cwd) => manager.discoverNodes(cwd));
+
+  // Servicos do Windows exigem permissao no SCM. Sem elevacao o Windows
+  // devolve "Acesso negado", entao o app oferece reiniciar-se como admin.
+  handle('app:is-elevated', () => isElevated());
+
+  handle('app:relaunch-elevated', () => {
+    const args = process.argv.slice(1).map((arg) => `'${arg.replace(/'/g, "''")}'`).join(',');
+    const exe = process.execPath.replace(/'/g, "''");
+    const script = `Start-Process -FilePath '${exe}' -ArgumentList ${args} -Verb RunAs`;
+
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
+      { windowsHide: true, timeout: 20000 },
+      (err) => {
+        if (err) {
+          console.error('[app] falha ao reiniciar elevado:', err.message);
+          return;
+        }
+        app.quit();
+      }
+    );
+    return true;
+  });
 }
 
 module.exports = { registerIpc };
