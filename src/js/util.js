@@ -48,6 +48,28 @@ export function formatClock(ts) {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+/** Formata bytes em KB/MB/GB. */
+export function formatBytes(mb) {
+  if (mb === null || mb === undefined) return '--';
+  if (mb < 1) return `${Math.round(mb * 1024)} KB`;
+  if (mb < 1024) return `${mb.toFixed(mb < 10 ? 1 : 0)} MB`;
+  return `${(mb / 1024).toFixed(2)} GB`;
+}
+
+/**
+ * Classifica um servico em um unico balde, para que os filtros de status
+ * e os contadores do topo batam entre si.
+ */
+export function statusOf(runtime) {
+  const state = runtime?.state || 'stopped';
+  const health = runtime?.health || 'unknown';
+
+  if (health === 'unhealthy') return 'down';
+  if (state === 'running') return 'running';
+  if (state === 'stopped' || state === 'paused') return 'stopped';
+  return 'problem'; // iniciando, parando, reiniciando, erro
+}
+
 /** Divide uma string de argumentos respeitando aspas duplas e simples. */
 export function splitArgs(input) {
   const args = [];

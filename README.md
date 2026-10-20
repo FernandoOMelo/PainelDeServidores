@@ -33,6 +33,12 @@ pela interface grafica, no lugar de varios terminais abertos.
 - **Descoberta** - varre as portas em escuta da maquina e os containers Docker
   existentes, permitindo adotar servidores que ja rodam fora do painel em modo
   "somente monitorar".
+- **Dashboard** - soma das metricas de todos os servicos: CPU total, memoria
+  total e o ranking dos maiores consumidores (ordenavel por memoria ou CPU). O
+  painel pode ser recolhido para sobra de espaco, e o estado e lembrado.
+- **Filtro por status** - os indicadores do topo (rodando, parados, fora do ar,
+  com problema) sao clicaveis e filtram a lista. Combinam com o filtro por
+  grupo, pela busca e por "somente ativos".
 
 ## Como rodar
 
@@ -171,6 +177,7 @@ src/
   styles.css          design system (tema escuro)
   js/
     app.js            orquestrador do renderer
+    dashboard.js      somatorio de metricas e maiores consumidores
     service-form.js   formulario de cadastro/edicao
     discovery.js      modal de descoberta (portas e containers)
     log-panel.js      painel de logs ao vivo

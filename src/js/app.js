@@ -1,11 +1,20 @@
-import { el, clear, formatUptime, STATE_LABELS, HEALTH_LABELS } from './util.js';
+import { el, clear, formatUptime, STATE_LABELS, HEALTH_LABELS, statusOf } from './util.js';
 import { openServiceForm } from './service-form.js';
 import { openDiscovery } from './discovery.js';
 import { LogPanel } from './log-panel.js';
+import { Dashboard } from './dashboard.js';
 import { confirmDialog, closeModal } from './modal.js';
 import { toast } from './toast.js';
 
 const api = window.api;
+
+/** Baldes de status: a mesma classificacao vale para o filtro e para os contadores. */
+const STATUS_BUCKETS = [
+  { key: 'running', label: 'rodando', color: 'var(--ok)' },
+  { key: 'stopped', label: 'parados', color: 'var(--idle)' },
+  { key: 'down', label: 'fora do ar', color: 'var(--danger)' },
+  { key: 'problem', label: 'com problema', color: 'var(--warn)' },
+];
 
 const state = {
   services: [],
@@ -13,11 +22,13 @@ const state = {
   selectedId: null,
   filter: '',
   group: 'all',
+  status: 'all',
   onlyRunning: false,
 };
 
 const cards = new Map(); // id -> { node, refs }
 let logPanel = null;
+let dashboard = null;
 
 /* ------------------------------------------------------------------ */
 /* Infraestrutura de render                                             */
@@ -34,6 +45,9 @@ function visibleServices() {
   const term = state.filter.toLowerCase();
   return state.services.filter((service) => {
     if (state.group !== 'all' && service.group !== state.group) return false;
+    if (state.status !== 'all') {
+      if (statusOf(state.runtime[service.id]) !== state.status) return false;
+    }
     if (state.onlyRunning) {
       const runtime = state.runtime[service.id];
       if (!runtime || !['running', 'starting'].includes(runtime.state)) return false;
@@ -252,31 +266,57 @@ function renderServices() {
 
   renderStats();
   renderGroupFilter();
+  refreshDashboard();
 }
 
 function renderStats() {
-  const counts = { running: 0, stopped: 0, problem: 0, total: state.services.length };
+  const counts = { running: 0, stopped: 0, down: 0, problem: 0 };
   for (const service of state.services) {
-    const runtime = state.runtime[service.id];
-    const status = runtime?.state || 'stopped';
-    if (status === 'running') counts.running += 1;
-    else if (status === 'stopped') counts.stopped += 1;
-    else counts.problem += 1;
+    counts[statusOf(state.runtime[service.id])] += 1;
   }
 
   clear(statsNode);
-  statsNode.append(
-    statItem(counts.running, 'rodando', 'var(--ok)'),
-    statItem(counts.stopped, 'parados', 'var(--idle)'),
-    statItem(counts.problem, 'com problema', 'var(--warn)'),
-    statItem(counts.total, 'cadastrados', 'var(--accent)')
-  );
-}
 
-function statItem(value, label, color) {
-  const dot = el('span', { class: 'dot' });
-  dot.style.background = color;
-  return el('div', { class: 'stat' }, [el('b', { text: String(value) }), dot, el('span', { text: label })]);
+  for (const bucket of STATUS_BUCKETS) {
+    const active = state.status === bucket.key;
+    const dot = el('span', { class: 'dot' });
+    dot.style.background = bucket.color;
+
+    const pill = el(
+      'button',
+      {
+        class: `stat${active ? ' active' : ''}`,
+        title: `Filtrar por ${bucket.label}`,
+        onClick: () => {
+          state.status = active ? 'all' : bucket.key;
+          renderServices();
+        },
+      },
+      [el('b', { text: String(counts[bucket.key]) }), dot, el('span', { text: bucket.label })]
+    );
+    statsNode.append(pill);
+  }
+
+  const total = el('div', { class: 'stat' }, [
+    el('b', { text: String(state.services.length) }),
+    el('span', { text: 'cadastrados' }),
+  ]);
+  statsNode.append(total);
+
+  if (state.status !== 'all') {
+    const bucket = STATUS_BUCKETS.find((b) => b.key === state.status);
+    statsNode.append(
+      el('button', {
+        class: 'stat-filter-hint',
+        text: `filtrando: ${bucket ? bucket.label : state.status} ✕`,
+        title: 'Limpar filtro de status',
+        onClick: () => {
+          state.status = 'all';
+          renderServices();
+        },
+      })
+    );
+  }
 }
 
 function renderGroupFilter() {
@@ -299,6 +339,21 @@ function renderGroupFilter() {
   for (const group of groups) {
     groupFilter.append(makeChip(group, group, state.services.filter((s) => s.group === group).length));
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Dashboard                                                            */
+/* ------------------------------------------------------------------ */
+
+let dashboardTimer = null;
+
+/** Re-render do dashboard, com limite de frequencia (as metricas chegam a cada 2s). */
+function refreshDashboard() {
+  if (!dashboard) return;
+  clearTimeout(dashboardTimer);
+  dashboardTimer = setTimeout(() => {
+    dashboard.render(state.services, state.runtime);
+  }, 250);
 }
 
 /* ------------------------------------------------------------------ */
@@ -395,7 +450,8 @@ api.on.state((snapshot) => {
   state.runtime[snapshot.id] = { ...(state.runtime[snapshot.id] || {}), ...snapshot };
   const service = state.services.find((s) => s.id === snapshot.id);
   if (service) paintCard(service);
-  renderStats();
+  // O status pode ter mudado de balde: refaz o filtro e os contadores.
+  renderServices();
 });
 
 api.on.metrics((payload) => {
@@ -404,6 +460,7 @@ api.on.metrics((payload) => {
     const service = state.services.find((s) => s.id === sample.id);
     if (service) paintCard(service);
   }
+  refreshDashboard();
 });
 
 api.on.health((payload) => {
@@ -421,6 +478,7 @@ api.on.health((payload) => {
   };
   const service = state.services.find((s) => s.id === payload.id);
   if (service) paintCard(service);
+  renderServices();
 });
 
 api.on.log(({ id, entries }) => logPanel.append(id, entries));
@@ -460,6 +518,7 @@ api.on.list((services) => {
 
 async function init() {
   logPanel = new LogPanel({ onSelect: selectService });
+  dashboard = new Dashboard(document.getElementById('dashboard'));
 
   try {
     const [services, runtime] = await Promise.all([api.services.list(), api.services.state()]);
