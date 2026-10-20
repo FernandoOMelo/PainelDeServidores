@@ -4,6 +4,7 @@ const { spawn } = require('node:child_process');
 const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const path = require('node:path');
+const { resolveExecution, detectNodeVersion } = require('./executables');
 
 const STATES = {
   STOPPED: 'stopped',
@@ -32,6 +33,8 @@ class ServiceRunner extends EventEmitter {
     this.lastError = null;
     this.intentionalStop = false;
     this.nextRetryAt = null;
+    this.nodePath = null;
+    this.nodeVersion = null;
 
     this.maxLogs = options.maxLogs ?? 2000;
     this.logs = [];
@@ -58,6 +61,7 @@ class ServiceRunner extends EventEmitter {
     return {
       id: this.service.id,
       state: this.state,
+      type: 'processo',
       pid: this.pid,
       exitCode: this.exitCode,
       exitSignal: this.exitSignal,
@@ -66,6 +70,8 @@ class ServiceRunner extends EventEmitter {
       restartCount: this.restartCount,
       nextRetryAt: this.nextRetryAt,
       lastError: this.lastError,
+      nodePath: this.nodePath,
+      nodeVersion: this.nodeVersion,
     };
   }
 
@@ -111,11 +117,22 @@ class ServiceRunner extends EventEmitter {
     if (!this._logStream) this.#openLogFile();
 
     const cwd = this.#resolveCwd();
-    const env = { ...process.env, ...this.service.env, FORCE_COLOR: '1' };
+    const execution = resolveExecution(this.service, this.options?.appRoot || process.cwd());
+    const env = { ...process.env, ...execution.env, ...this.service.env, FORCE_COLOR: '1' };
+
+    if (execution.warning) this.#appendLog('system', execution.warning);
+
+    this.nodePath = execution.nodePath;
+    if (execution.nodePath) {
+      detectNodeVersion(execution.nodePath).then((version) => {
+        this.nodeVersion = version;
+        this.#emitState();
+      });
+    }
 
     let child;
     try {
-      child = spawn(this.service.command, this.service.args, {
+      child = spawn(execution.command, execution.args, {
         cwd,
         env,
         shell: this.service.shell,
@@ -157,6 +174,9 @@ class ServiceRunner extends EventEmitter {
         this.state = STATES.RUNNING;
         this.startedAt = Date.now();
         this.#appendLog('system', `Iniciado: ${this.#commandLine()}`);
+        if (this.nodePath) {
+          this.#appendLog('system', `Node: ${this.nodePath}`);
+        }
         this.#emitState();
       }
       this.#armStabilityTimer();
@@ -232,6 +252,17 @@ class ServiceRunner extends EventEmitter {
     await this.stop();
     this.intentionalStop = false;
     this.start();
+  }
+
+  /**
+   * Modo somente leitura: o painel nao controla o processo. Para processos
+   * externos nao existe PID a acompanhar, entao o acompanhamento se da pelo
+   * health check de porta configurado no servico.
+   */
+  observe() {
+    this.observed = true;
+    this.state = STATES.STOPPED;
+    this.#emitState();
   }
 
   #killTree(pid) {

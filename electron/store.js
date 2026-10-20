@@ -108,6 +108,8 @@ function normalizeService(input) {
   const command = String(input.command || '').trim();
   const cwd = String(input.cwd || '').trim();
 
+  const type = input.type === 'docker' ? 'docker' : 'processo';
+
   const health = { ...DEFAULT_HEALTH, ...(input.health || {}) };
   health.type = ['none', 'tcp', 'http'].includes(health.type) ? health.type : 'none';
   health.port = health.port ? Number(health.port) : null;
@@ -135,6 +137,7 @@ function normalizeService(input) {
     id,
     name,
     group: String(input.group || '').trim() || 'Geral',
+    type,
     command,
     args: Array.isArray(input.args)
       ? input.args.map(String).filter((a) => a !== '')
@@ -148,6 +151,12 @@ function normalizeService(input) {
     shell: Boolean(input.shell),
     autostart: Boolean(input.autostart),
     monitorOnly: Boolean(input.monitorOnly),
+    // Node proprio do servico: caminho do node.exe (ou da pasta que o contem).
+    // A pasta entra no PATH do processo, entao npm/npx e os filhos usam a
+    // mesma versao - permite rodar varias versoes em paralelo.
+    nodePath: String(input.nodePath || '').trim(),
+    // Container alvo quando type = 'docker'.
+    container: String(input.container || '').trim(),
     health,
     restart,
     createdAt: input.createdAt || new Date().toISOString(),
