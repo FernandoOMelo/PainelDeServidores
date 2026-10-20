@@ -39,6 +39,13 @@ pela interface grafica, no lugar de varios terminais abertos.
 - **Filtro por status** - os indicadores do topo (rodando, parados, fora do ar,
   com problema) sao clicaveis e filtram a lista. Combinam com o filtro por
   grupo, pela busca e por "somente ativos".
+- **Bandeja do sistema** - fechar a janela nao encerra o app: ele continua
+  monitorando os servicos em segundo plano, com icone na bandeja. O menu da
+  bandeja traz abrir, iniciar/parar todos e a opcao de inicializacao
+  automatica. A janela e destruida de verdade ao fechar, o que libera a
+  memoria do renderer.
+- **Inicializacao automatica com o Windows** - o app pode subir junto com o
+  sistema, direto na bandeja (sem abrir janela).
 
 ## Como rodar
 
@@ -169,6 +176,7 @@ electron/
   docker-runner.js    ciclo de vida de containers (start/stop/logs/metricas)
   windows-service.js  cliente do Service Control Manager do Windows
   windows-service-runner.js  ciclo de vida de servicos do Windows
+  autostart.js        inicializacao automatica com o Windows (registro)
   health-checker.js   verificacoes TCP/HTTP
   metrics.js          coletor de CPU/memoria por processo
   discovery.js        varredura de portas em escuta
@@ -186,6 +194,7 @@ src/
     util.js           helpers de DOM e formatacao
 scripts/
   selftest.js         teste funcional do motor
+  autostart-check.js  verificacao da inicializacao automatica no registro
 examples/
   api-demo.js         servidor HTTP de exemplo
 ```

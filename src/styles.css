@@ -534,6 +534,75 @@ body {
   padding: 8px 0 2px;
 }
 
+/* ---------- Menu de opcoes ---------- */
+
+.menu-wrap {
+  position: relative;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  min-width: 240px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 6px;
+  display: none;
+  z-index: 60;
+}
+
+.menu.open {
+  display: block;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+
+.menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.menu-item .check {
+  width: 14px;
+  color: var(--ok);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.menu-item .check.off {
+  color: transparent;
+}
+
+.menu-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 5px 2px;
+}
+
+.menu-note {
+  padding: 7px 10px;
+  font-size: 11px;
+  color: var(--text-faint);
+  line-height: 1.45;
+}
+
 /* ---------- Stats clicaveis (filtro por status) ---------- */
 
 .stat {

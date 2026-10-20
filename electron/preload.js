@@ -46,6 +46,9 @@ contextBridge.exposeInMainWorld('api', {
   app: {
     relaunchElevated: () => invoke('app:relaunch-elevated'),
     isElevated: () => invoke('app:is-elevated'),
+    hideWindow: () => invoke('app:hide-window'),
+    autoStart: () => invoke('app:auto-start'),
+    setAutoStart: (enabled) => invoke('app:set-auto-start', enabled),
   },
   node: {
     version: (nodePath) => invoke('node:version', nodePath),

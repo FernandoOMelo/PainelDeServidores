@@ -2,6 +2,7 @@
 
 const { ipcMain, BrowserWindow } = require('electron');
 const { execFile } = require('node:child_process');
+const path = require('node:path');
 
 /**
  * O processo esta rodando com token elevado (administrador de verdade)?
@@ -39,7 +40,16 @@ function isElevated() {
  * Registra os handlers IPC. Toda a comunicacao renderer -> main passa por
  * aqui; o renderer nunca tem acesso direto ao Node.
  */
-function registerIpc({ manager, store, listListeningPorts, isPortOpen, app }) {
+function registerIpc({
+  manager,
+  store,
+  listListeningPorts,
+  isPortOpen,
+  app,
+  hideWindow,
+  isAutoStartEnabled,
+  setAutoStart,
+}) {
   const handle = (channel, fn) => {
     ipcMain.handle(channel, async (_event, ...args) => {
       try {
@@ -88,6 +98,16 @@ function registerIpc({ manager, store, listListeningPorts, isPortOpen, app }) {
   // Servicos do Windows exigem permissao no SCM. Sem elevacao o Windows
   // devolve "Acesso negado", entao o app oferece reiniciar-se como admin.
   handle('app:is-elevated', () => isElevated());
+
+  // Inicializacao automatica com o Windows.
+  handle('app:auto-start', () => isAutoStartEnabled());
+  handle('app:set-auto-start', (enabled) => setAutoStart(enabled));
+
+  handle('app:hide-window', () => {
+    // A interface pediu para ir para a bandeja.
+    hideWindow?.();
+    return true;
+  });
 
   handle('app:relaunch-elevated', () => {
     const args = process.argv.slice(1).map((arg) => `'${arg.replace(/'/g, "''")}'`).join(',');

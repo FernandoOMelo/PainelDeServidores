@@ -364,6 +364,13 @@ function selectService(id, { toggle = false } = {}) {
   state.selectedId = toggle && state.selectedId === id ? null : id;
   logPanel.select(state.selectedId);
   for (const service of state.services) paintCard(service);
+  // A janela e destruida ao ir para a bandeja: guardar a selecao para
+  // quando ela voltar.
+  try {
+    localStorage.setItem('painel:selected', state.selectedId || '');
+  } catch {
+    /* localStorage pode estar indisponivel */
+  }
 }
 
 function reportError(err) {
@@ -441,6 +448,71 @@ document.getElementById('btn-discover').addEventListener('click', () =>
       state.services.some((s) => s.type === 'docker' && s.container === containerName)
   ).catch(reportError)
 );
+
+/* ------------------------------------------------------------------ */
+/* Menu de opcoes do app                                                */
+/* ------------------------------------------------------------------ */
+
+const appMenuButton = document.getElementById('btn-app-menu');
+const appMenu = document.getElementById('app-menu');
+let autoStartEnabled = false;
+
+async function renderAppMenu() {
+  clear(appMenu);
+
+  try {
+    autoStartEnabled = Boolean(await api.app.autoStart());
+  } catch {
+    autoStartEnabled = false;
+  }
+
+  appMenu.append(
+    menuItem('Iniciar com o Windows', autoStartEnabled, async () => {
+      try {
+        autoStartEnabled = await api.app.setAutoStart(!autoStartEnabled);
+        toast({
+          title: 'Inicialização automática',
+          message: autoStartEnabled
+            ? 'O painel vai subir com o Windows, direto na bandeja.'
+            : 'O painel não vai mais subir com o Windows.',
+          level: 'success',
+        });
+      } catch (err) {
+        reportError(err);
+      }
+    }),
+    el('div', { class: 'menu-sep' }),
+    menuItem('Minimizar para a bandeja', null, () => {
+      api.app.hideWindow().catch(reportError);
+    }),
+    menuItem('Recarregar painel', null, () => window.location.reload()),
+    el('div', { class: 'menu-sep' }),
+    el('div', {
+      class: 'menu-note',
+      text: 'Fechar a janela envia o painel para a bandeja: ele continua monitorando os serviços em segundo plano.',
+    })
+  );
+}
+
+function menuItem(label, checked, onClick) {
+  return el('button', { class: 'menu-item', onClick }, [
+    el('span', { class: `check${checked ? '' : ' off'}`, text: '✓' }),
+    el('span', { text: label }),
+  ]);
+}
+
+appMenuButton.addEventListener('click', async (event) => {
+  event.stopPropagation();
+  const wasOpen = appMenu.classList.contains('open');
+  if (!wasOpen) await renderAppMenu();
+  appMenu.classList.toggle('open');
+});
+
+document.addEventListener('click', (event) => {
+  if (!appMenu.contains(event.target) && event.target !== appMenuButton) {
+    appMenu.classList.remove('open');
+  }
+});
 
 /* ------------------------------------------------------------------ */
 /* Eventos do processo principal                                        */
@@ -532,6 +604,18 @@ async function init() {
 
     logPanel.setServices(services);
     renderServices();
+
+    // Restaura o servico que estava selecionado antes de ir para a bandeja.
+    try {
+      const saved = localStorage.getItem('painel:selected');
+      if (saved && services.some((s) => s.id === saved)) {
+        state.selectedId = saved;
+        logPanel.select(saved);
+        for (const service of services) paintCard(service);
+      }
+    } catch {
+      /* localStorage pode estar indisponivel */
+    }
 
     const sub = document.getElementById('brand-sub');
     sub.textContent = `${services.length} servico(s) | atualizacao em tempo real`;
