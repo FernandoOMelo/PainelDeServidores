@@ -1,0 +1,6 @@
+node_modules/
+logs/
+config.local.json
+*.corrompido-*
+.DS_Store
+Thumbs.db

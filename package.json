@@ -1,0 +1,15 @@
+{
+  "name": "painel-servidores",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Painel desktop para iniciar, parar e monitorar servidores locais",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "test": "node scripts/selftest.js"
+  },
+  "devDependencies": {
+    "electron": "^44.9.1"
+  }
+}

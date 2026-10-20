@@ -1,0 +1,9 @@
+# Normaliza line endings para LF no repositorio (evita diffs ruidosos no Windows).
+* text=auto eol=lf
+
+*.js   text eol=lf
+*.json text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.md   text eol=lf
+*.png  binary
