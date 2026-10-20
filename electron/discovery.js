@@ -83,26 +83,56 @@ async function listPosix() {
   return entries;
 }
 
+/**
+ * Nome dos processos por PID, com cache.
+ *
+ * A busca de nomes e cara (tasklist sem filtro leva ~1,4s). Como a lista de
+ * portas e estavel, guardar o nome por PID evita refazer a consulta a cada
+ * varredura - e evita o custo de memoria de subir um interpretador.
+ */
+const nameCache = new Map(); // pid -> { name, at }
+const NAME_CACHE_TTL = 120000;
+
 async function processNames(pids) {
   const map = new Map();
   if (!pids.length) return map;
 
-  if (process.platform === 'win32') {
-    const out = await run('powershell.exe', [
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      `Get-Process -Id @(${pids.join(',')}) -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Id)|$($_.ProcessName)" }`,
-    ]);
-    for (const line of out.split(/\r?\n/)) {
-      const [pid, name] = line.trim().split('|');
-      if (pid && name) map.set(Number(pid), name);
+  const now = Date.now();
+  const faltando = [];
+  for (const pid of pids) {
+    const cached = nameCache.get(pid);
+    if (cached && now - cached.at < NAME_CACHE_TTL) {
+      map.set(pid, cached.name);
+    } else {
+      faltando.push(pid);
     }
-  } else {
-    const out = await run('ps', ['-o', 'pid=,comm=', '-p', pids.join(',')]);
+  }
+  if (!faltando.length) return map;
+
+  if (process.platform === 'win32') {
+    // tasklist sem filtro e lento, mas traz todos os processos de uma vez.
+    const out = await run('tasklist.exe', ['/FO', 'CSV', '/NH']);
+    const wanted = new Set(faltando);
     for (const line of out.split(/\r?\n/)) {
-      const [pid, ...rest] = line.trim().split(/\s+/);
-      if (pid) map.set(Number(pid), rest.join(' '));
+      if (!line.trim()) continue;
+      const parts = line.split('","');
+      if (parts.length < 2) continue;
+      const name = parts[0].replace(/^"/, '');
+      const pid = Number(parts[1].replace(/"/g, ''));
+      if (pid && name && wanted.has(pid)) {
+        map.set(pid, name);
+        nameCache.set(pid, { name, at: now });
+      }
+    }
+    return map;
+  }
+
+  const out = await run('ps', ['-o', 'pid=,comm=', '-p', faltando.join(',')]);
+  for (const line of out.split(/\r?\n/)) {
+    const [pid, ...rest] = line.trim().split(/\s+/);
+    if (pid) {
+      map.set(Number(pid), rest.join(' '));
+      nameCache.set(Number(pid), { name: rest.join(' '), at: now });
     }
   }
   return map;

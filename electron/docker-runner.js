@@ -35,6 +35,7 @@ class DockerRunner extends EventEmitter {
     this.intentionalStop = false;
     this.nextRetryAt = null;
     this.observed = false;
+    this.displayMode = false;
 
     this.maxLogs = options.maxLogs ?? 2000;
     this.logs = [];
@@ -169,7 +170,7 @@ class DockerRunner extends EventEmitter {
   monitor() {
     this.#startMonitor();
     this.#startLogs();
-    this.#startStats();
+    if (this.displayMode !== false) this.#startStats();
     this.#poll().catch(() => {});
   }
 
@@ -249,6 +250,17 @@ class DockerRunner extends EventEmitter {
     this.#emitState();
   }
 
+  /**
+   * A interface abriu ou fechou. As consultas de recurso do Docker
+   * (docker stats) existem so para exibir numeros: com a janela fechada
+   * elas sao dispensadas e o processo do docker.exe nao precisa existir.
+   */
+  setDisplayMode(active) {
+    this.displayMode = active;
+    if (active) this.#startStats();
+    else this.#stopStats();
+  }
+
   #startStats() {
     if (this._statsTimer) return;
     this.#stopStats();
@@ -321,44 +333,60 @@ class DockerRunner extends EventEmitter {
     if (this._logProcess) return;
     this.#stopLogs();
 
-    let child;
+    let source;
     try {
-      child = this.docker.streamLogs(this.service.container, { tail: 200 });
+      source = this.docker.streamLogs(this.service.container, { tail: 200 });
     } catch (err) {
       this.#appendLog('system', `ERRO ao abrir logs: ${err.message}`);
       return;
     }
 
-    this._logProcess = child;
+    this._logProcess = source;
     this.#openLogFile();
 
-    const consume = (stream, chunk) => {
-      const text = chunk.toString();
-      const lines = text.split(/\r?\n/).filter((line) => line.length > 0);
+    if (source.stdout) {
+      // Via CLI: processo com stdout/stderr.
+      const consume = (stream, chunk) => {
+        const text = chunk.toString();
+        const lines = text.split(/\r?\n/).filter((line) => line.length > 0);
+        if (lines.length) {
+          this.#pushLogs(lines.map((line) => ({ ts: Date.now(), stream, text: line })));
+        }
+      };
+
+      source.stdout.setEncoding('utf8');
+      source.stderr.setEncoding('utf8');
+      source.stdout.on('data', (chunk) => consume('stdout', chunk));
+      source.stderr.on('data', (chunk) => consume('stderr', chunk));
+      source.on('error', (err) => this.#appendLog('system', `ERRO no stream de logs: ${err.message}`));
+      source.on('close', () => {
+        if (this._logProcess === source) this._logProcess = null;
+      });
+      return;
+    }
+
+    // Via API: eventos 'line' com o texto ja decodificado.
+    source.on('line', (stream, text) => {
+      const lines = String(text).split(/\r?\n/).filter((line) => line.length > 0);
       if (lines.length) {
         this.#pushLogs(lines.map((line) => ({ ts: Date.now(), stream, text: line })));
       }
-    };
-
-    child.stdout?.setEncoding('utf8');
-    child.stderr?.setEncoding('utf8');
-    child.stdout?.on('data', (chunk) => consume('stdout', chunk));
-    child.stderr?.on('data', (chunk) => consume('stderr', chunk));
-
-    child.on('exit', () => {
-      if (this._logProcess === child) this._logProcess = null;
+    });
+    source.on('error', (err) => this.#appendLog('system', `ERRO no stream de logs: ${err.message}`));
+    source.on('close', () => {
+      if (this._logProcess === source) this._logProcess = null;
     });
   }
 
   #stopLogs() {
-    if (this._logProcess) {
-      try {
-        this._logProcess.kill();
-      } catch {
-        /* ignorado */
-      }
-      this._logProcess = null;
+    if (!this._logProcess) return;
+    try {
+      if (typeof this._logProcess.stop === 'function') this._logProcess.stop();
+      else this._logProcess.kill();
+    } catch {
+      /* ja encerrado */
     }
+    this._logProcess = null;
   }
 
   #openLogFile() {

@@ -1,30 +1,30 @@
 'use strict';
 
 const { execFile, spawn } = require('node:child_process');
+const { DockerApi } = require('./docker-api');
 
 /**
- * Cliente da CLI do Docker. Usa a CLI (instalada junto com o Docker Desktop)
- * em vez da API HTTP para nao depender de socket, TLS ou de versao.
+ * Cliente do Docker.
+ *
+ * Prefere a API do Engine (pelo named pipe) e usa a CLI como reserva.
+ * A diferenca importa: cada docker.exe custa ~20 MB, e o painel spawna
+ * varios (um por container em logs e stats). Pela API nada e spawned.
  */
 class DockerClient {
   constructor(options = {}) {
     this.binary = options.binary || 'docker';
-    this._availability = null;
+    this.api = new DockerApi({ pipes: options.pipes });
+    this._apiBroken = false;
   }
 
-  run(args, { timeout = 20000 } = {}) {
-    return new Promise((resolve, reject) => {
+  exec(bin, args, { timeout = 20000 } = {}) {
+    return new Promise((resolve) => {
       execFile(
-        this.binary,
+        bin,
         args,
-        { windowsHide: true, timeout, maxBuffer: 16 * 1024 * 1024 },
+        { windowsHide: true, timeout, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
         (err, stdout, stderr) => {
-          if (err) {
-            const detail = (stderr || '').toString().trim() || err.message;
-            reject(new Error(detail));
-            return;
-          }
-          resolve(stdout.toString());
+          resolve({ code: err?.code ?? 0, stdout: stdout || '', stderr: stderr || '' });
         }
       );
     });
@@ -32,73 +32,110 @@ class DockerClient {
 
   /** Verifica se a CLI existe e se o daemon responde. */
   async availability() {
-    if (this._availability) return this._availability;
+    if (this._apiBroken === false) {
+      try {
+        const info = await this.api.request('/version');
+        if (info?.Version) {
+          this._apiBroken = false;
+          return { ok: true, version: info.Version, via: 'api' };
+        }
+      } catch {
+        this._apiBroken = true;
+      }
+    }
 
     try {
-      const server = await this.run(['version', '--format', '{{.Server.Version}}'], { timeout: 10000 });
-      this._availability = { ok: true, version: server.trim() };
-    } catch (err) {
-      this._availability = {
-        ok: false,
-        error: err.message.includes('docker') ? err.message : 'Docker nao encontrado ou daemon parado',
-      };
+      const { code, stdout } = await this.exec(this.binary, ['version', '--format', '{{.Server.Version}}'], {
+        timeout: 10000,
+      });
+      if (code === 0 && stdout.trim()) {
+        return { ok: true, version: stdout.trim(), via: 'cli' };
+      }
+    } catch {
+      /* sem CLI */
     }
-    return this._availability;
+
+    return {
+      ok: false,
+      error: 'Docker nao encontrado ou daemon parado',
+    };
   }
 
-  /** Lista containers (rodando e parados). */
+  /* --------------------------- operacoes --------------------------- */
+
   async listContainers() {
-    const out = await this.run(['ps', '-a', '--format', '{{json .}}']);
-    const rows = out
+    if (!this._apiBroken) {
+      try {
+        return await this.api.listContainers();
+      } catch {
+        this._apiBroken = true;
+      }
+    }
+
+    const { code, stdout } = await this.exec(this.binary, ['ps', '-a', '--format', '{{json .}}']);
+    if (code !== 0 || !stdout.trim()) return [];
+
+    return stdout
       .split(/\r?\n/)
       .filter(Boolean)
       .map((line) => {
         try {
-          return JSON.parse(line);
+          const row = JSON.parse(line);
+          return {
+            id: row.ID,
+            name: row.Names,
+            image: row.Image,
+            state: (row.State || '').toLowerCase(),
+            status: row.Status,
+            ports: row.Ports,
+            createdAt: row.CreatedAt,
+          };
         } catch {
           return null;
         }
       })
       .filter(Boolean);
-
-    return rows.map((row) => ({
-      id: row.ID,
-      name: row.Names,
-      image: row.Image,
-      command: row.Command,
-      state: (row.State || '').toLowerCase(),
-      status: row.Status,
-      ports: row.Ports,
-      createdAt: row.CreatedAt,
-    }));
   }
 
-  /** Estado detalhado de um container (inclui healthcheck e exit code). */
   async inspect(container) {
-    const raw = await this.run(['inspect', container, '--format', '{{json .}}'], { timeout: 15000 });
-    const parsed = JSON.parse(raw);
+    if (!this._apiBroken) {
+      try {
+        return await this.api.inspect(container);
+      } catch {
+        this._apiBroken = true;
+      }
+    }
+
+    const { code, stdout } = await this.exec(this.binary, [
+      'inspect',
+      container,
+      '--format',
+      '{{json .}}',
+    ]);
+    if (code !== 0 || !stdout.trim()) return null;
+
+    let parsed;
+    try {
+      parsed = JSON.parse(stdout);
+    } catch {
+      return null;
+    }
 
     // Com --format a saida e um objeto por container; sem ele, um array.
     const info = Array.isArray(parsed) ? parsed[0] : parsed;
-    if (!info) throw new Error(`Container nao encontrado: ${container}`);
+    if (!info?.Name) return null;
 
     const state = info.State || {};
     const health = state.Health || null;
-    const bindings = info.NetworkSettings?.Ports || {};
-
     const ports = [];
-    const seenPublished = new Set();
-    for (const [containerPort, hosts] of Object.entries(bindings)) {
-      if (!hosts?.length) {
+
+    for (const [containerPort, bindings] of Object.entries(info.NetworkSettings?.Ports || {})) {
+      if (!bindings?.length) {
         ports.push({ port: containerPort, published: null, host: null });
         continue;
       }
-      for (const host of hosts) {
-        // A mesma porta costuma estar publicada em IPv4 e IPv6: mostra uma vez.
-        const key = `${containerPort}->${host.HostPort}`;
-        if (seenPublished.has(key)) continue;
-        seenPublished.add(key);
-        ports.push({ port: containerPort, published: host.HostPort, host: host.HostIp });
+      for (const binding of bindings) {
+        ports.push({ port: containerPort, published: binding.HostPort, host: binding.HostIp });
       }
     }
 
@@ -119,29 +156,62 @@ class DockerClient {
   }
 
   async start(container) {
-    await this.run(['start', container]);
+    if (!this._apiBroken) {
+      try {
+        await this.api.start(container);
+        return;
+      } catch {
+        this._apiBroken = true;
+      }
+    }
+    await this.exec(this.binary, ['start', container]);
   }
 
   async stop(container, { timeout = 10 } = {}) {
-    await this.run(['stop', '-t', String(timeout), container], { timeout: (timeout + 20) * 1000 });
+    if (!this._apiBroken) {
+      try {
+        await this.api.stop(container, { timeout });
+        return;
+      } catch {
+        this._apiBroken = true;
+      }
+    }
+    await this.exec(this.binary, ['stop', '-t', String(timeout), container], { timeout: (timeout + 20) * 1000 });
   }
 
   async restart(container) {
-    await this.run(['restart', container], { timeout: 60000 });
+    if (!this._apiBroken) {
+      try {
+        await this.api.restart(container);
+        return;
+      } catch {
+        this._apiBroken = true;
+      }
+    }
+    await this.exec(this.binary, ['restart', container], { timeout: 60000 });
   }
 
-  /** Estatisticas de recurso de um container (CPU% e memoria usada). */
   async stats(container) {
-    const out = await this.run(
-      ['stats', '--no-stream', '--format', '{{json .}}', container],
-      { timeout: 15000 }
-    );
-    const line = out.split(/\r?\n/).filter(Boolean)[0];
-    if (!line) return null;
+    if (!this._apiBroken) {
+      try {
+        return await this.api.stats(container);
+      } catch {
+        this._apiBroken = true;
+      }
+    }
+
+    const { code, stdout } = await this.exec(this.binary, [
+      'stats',
+      '--no-stream',
+      '--format',
+      '{{json .}}',
+      container,
+    ]);
+    if (code !== 0 || !stdout.trim()) return null;
 
     let parsed;
     try {
-      parsed = JSON.parse(line);
+      parsed = JSON.parse(stdout.split(/\r?\n/)[0]);
     } catch {
       return null;
     }
@@ -150,17 +220,64 @@ class DockerClient {
       cpu: parsePercent(parsed.CPUPerc),
       mem: parseSize(parsed.MemUsage),
       memPercent: parsePercent(parsed.MemPerc),
-      net: parsed.NetIO || null,
-      blockIo: parsed.BlockIO || null,
     };
   }
 
-  /** Fluxo de logs do container (equivalente a `docker logs -f`). */
+  /**
+   * Stream de logs. Pela API vem um stream multiplexado; pela CLI, um
+   * processo docker.exe. Os dois entregam os mesmos eventos.
+   */
   streamLogs(container, { tail = 200 } = {}) {
+    if (!this._apiBroken) {
+      try {
+        const stream = this.api.streamLogs(container, { tail });
+        // A API pode falhar depois de connected; nesse caso o runner
+        // simplesmente nao recebe logs, mas o servico segue monitorado.
+        return stream;
+      } catch {
+        this._apiBroken = true;
+      }
+    }
+
     return spawn(this.binary, ['logs', '--tail', String(tail), '-f', container], {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+  }
+}
+
+/** Estado numerico do sc.exe -> nome oficial do estado. */
+const STATE_NAMES = {
+  1: 'Stopped',
+  2: 'Start Pending',
+  3: 'Stop Pending',
+  4: 'Running',
+  5: 'Continue Pending',
+  6: 'Pause Pending',
+  7: 'Paused',
+};
+
+/** Traduz os codigos do sc.exe em mensagens uteis. */
+function translateScError(code, output) {
+  switch (code) {
+    case 5:
+      return 'Acesso negado ao abrir o servico. Reinicie o painel como administrador para poder iniciar ou parar servicos do Windows.';
+    case 1056:
+      return 'O servico ja esta em execucao.';
+    case 1057:
+      return 'O servico nao foi iniciado.';
+    case 1058:
+      return 'O servico esta desabilitado.';
+    case 1060:
+      return 'O servico nao existe.';
+    case 1061:
+      return 'O servico foi marcado para exclusao.';
+    case 1062:
+      return 'O servico nao esta em execucao.';
+    case 1053:
+      return 'O servico nao respondeu a tempo para iniciar ou parar.';
+    default:
+      return output || `Falha (codigo ${code}) ao controlar o servico.`;
   }
 }
 
@@ -197,4 +314,4 @@ function parseSize(value) {
   return Math.round(amount * factor * 10) / 10;
 }
 
-module.exports = { DockerClient, parseSize, parsePercent };
+module.exports = { DockerClient, parseSize, parsePercent, STATE_NAMES, translateScError };
