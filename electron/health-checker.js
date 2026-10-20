@@ -4,6 +4,7 @@ const net = require('node:net');
 const http = require('node:http');
 const https = require('node:https');
 const { EventEmitter } = require('node:events');
+const { findPortOwner } = require('./discovery');
 
 /**
  * Monitora a saude de um servico: porta TCP, endpoint HTTP ou nada.
@@ -62,6 +63,16 @@ class HealthMonitor extends EventEmitter {
 
     result.latencyMs = Date.now() - started;
     result.checkedAt = Date.now();
+
+    // Quem esta escutando essa porta? Sem isso, um health check que passa
+    // apenas confirma que "algo" responde na porta - pode ser outro servico.
+    if (result.ok && health.port) {
+      const owner = await findPortOwner(health.port).catch(() => null);
+      if (owner) {
+        result.owner = { process: owner.process, pid: owner.pid, address: owner.address };
+      }
+    }
+
     this.lastResult = result;
 
     if (result.ok) {

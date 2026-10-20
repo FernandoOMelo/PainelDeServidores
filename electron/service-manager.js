@@ -194,6 +194,9 @@ class ServiceManager extends EventEmitter {
     }
     this.store.setServices([...this.services, service]);
     this.#attach(service);
+    // Servico somente monitorar precisa comecar a acompanhar imediatamente,
+    // mesmo tendo sido criado depois do init().
+    if (service.monitorOnly) this.observe(service.id);
     this.emit('services-changed', this.list());
     return service;
   }
@@ -221,7 +224,8 @@ class ServiceManager extends EventEmitter {
       this.monitors.delete(id);
 
       const fresh = this.#attach(service);
-      if (wasRunning) fresh.start();
+      if (service.monitorOnly) this.observe(id);
+      else if (wasRunning) fresh.start();
     }
 
     this.emit('services-changed', this.list());

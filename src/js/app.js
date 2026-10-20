@@ -169,12 +169,25 @@ function paintCard(service) {
   refs.memValue.textContent = live && runtime.mem !== undefined ? `${runtime.mem} MB` : '--';
 
   const health = runtime.health || 'unknown';
+  const detail = runtime.healthDetail || {};
+  const owner = detail.owner?.process;
+  const latency = detail.latencyMs ? ` (${detail.latencyMs}ms)` : '';
+
   refs.healthDot.className = `health-dot ${health}`;
-  refs.healthText.textContent = isDocker
-    ? `${HEALTH_LABELS[health] || health}`
-    : service.health?.type === 'none'
-      ? 'sem verificacao'
-      : `${HEALTH_LABELS[health] || health}${runtime.healthDetail?.latencyMs ? ` (${runtime.healthDetail.latencyMs}ms)` : ''}`;
+
+  if (isDocker) {
+    refs.healthText.textContent = HEALTH_LABELS[health] || health;
+  } else if (service.health?.type === 'none') {
+    refs.healthText.textContent = 'sem verificacao';
+  } else {
+    // Mostra quem responde na porta: evita o falso positivo de outra
+    // aplicacao estar ocupando a mesma porta.
+    const who = owner ? ` · ${owner}` : '';
+    refs.healthText.textContent = `${HEALTH_LABELS[health] || health}${latency}${who}`;
+    refs.healthText.title = owner
+      ? `Responde na porta ${service.health.port}: ${detail.owner.process} (pid ${detail.owner.pid})`
+      : '';
+  }
 
   // Servico somente monitorar: o painel mostra o estado real, mas nao controla.
   const readOnly = Boolean(service.monitorOnly);
@@ -283,6 +296,7 @@ function selectService(id, { toggle = false } = {}) {
 }
 
 function reportError(err) {
+  console.error('[painel]', err);
   toast({ title: 'Erro', message: err.message, level: 'error' });
 }
 
@@ -381,7 +395,13 @@ api.on.health((payload) => {
   state.runtime[payload.id] = {
     ...current,
     health: payload.state,
-    healthDetail: { latencyMs: payload.latencyMs, error: payload.error, status: payload.status },
+    healthDetail: {
+      latencyMs: payload.latencyMs,
+      error: payload.error,
+      status: payload.status,
+      // Quem responde na porta (processo e pid).
+      owner: payload.owner,
+    },
   };
   const service = state.services.find((s) => s.id === payload.id);
   if (service) paintCard(service);

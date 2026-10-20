@@ -128,4 +128,26 @@ function isPortOpen(port, host = '127.0.0.1', timeout = 800) {
   });
 }
 
-module.exports = { listListeningPorts, isPortOpen };
+module.exports = { listListeningPorts, isPortOpen, findPortOwner };
+
+/* ------------------------------------------------------------------ */
+/* Dono da porta                                                        */
+/* ------------------------------------------------------------------ */
+
+let ownerCache = { at: 0, rows: [] };
+
+/**
+ * Descobre qual processo esta escutando uma porta.
+ * O resultado e cacheado por alguns segundos, porque a varredura completa
+ * (netstat + consulta de nomes) custa mais que um health check.
+ */
+async function findPortOwner(port) {
+  if (Date.now() - ownerCache.at > 5000) {
+    try {
+      ownerCache = { at: Date.now(), rows: await listListeningPorts() };
+    } catch {
+      ownerCache = { at: Date.now(), rows: [] };
+    }
+  }
+  return ownerCache.rows.find((row) => row.port === port) ?? null;
+}

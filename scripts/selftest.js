@@ -11,12 +11,13 @@ const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
 const assert = require('node:assert');
-const { execFile } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
 
 const { Store } = require('../electron/store');
 const { ServiceManager } = require('../electron/service-manager');
 
 const PORT = 45999;
+const EXTERNAL_PORT = 45998;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const results = [];
@@ -34,7 +35,7 @@ function check(name, fn) {
 async function waitFor(predicate, timeoutMs = 12000, label = 'condicao') {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (predicate()) return true;
+    if (await predicate()) return true;
     await sleep(200);
   }
   throw new Error(`timeout aguardando: ${label}`);
@@ -261,12 +262,97 @@ async function main() {
     await runDocker(['rm', '-f', containerName]);
   }
 
+  console.log('\n== 10. Servico iniciado fora do painel (somente monitorar) ==');
+  // Simula um servidor que NAO foi iniciado pelo painel (ex.: um .exe que
+  // gerencia a API). O painel deve detectar que ele esta online.
+  const external = spawn(process.execPath, [
+    '-e',
+    `require('http').createServer((q,s)=>s.end('ok')).listen(${EXTERNAL_PORT},()=>console.log('externo no ar'))`,
+  ]);
+  external.stdout.resume();
+  external.stderr.resume();
+  await waitFor(() => isPortListening(EXTERNAL_PORT), 10000, 'servidor externo no ar');
+
+  const watched = manager.create({
+    name: 'API externa (gerida por outro app)',
+    type: 'processo',
+    command: '',
+    monitorOnly: true,
+    health: {
+      type: 'http',
+      port: EXTERNAL_PORT,
+      path: '/',
+      expectStatus: 200,
+      intervalMs: 1000,
+      timeoutMs: 1500,
+      graceMs: 0,
+      failuresBeforeUnhealthy: 2,
+    },
+  });
+  check('servico somente monitorar foi criado sem comando', () => {
+    assert.ok(manager.getService(watched.id));
+    assert.strictEqual(manager.getService(watched.id).monitorOnly, true);
+  });
+
+  await waitFor(
+    () => manager.getState()[watched.id]?.health === 'healthy',
+    12000,
+    'health check detectando o servico externo online'
+  );
+  check('painel detectou que o servico externo esta online', () => {
+    assert.strictEqual(manager.getState()[watched.id].health, 'healthy');
+  });
+  check('painel nao assumiu o controle do processo externo', () => {
+    const state = manager.getState()[watched.id];
+    assert.strictEqual(state.pid, null, 'o painel nao deve ter PID de um servico que nao iniciou');
+    assert.notStrictEqual(state.state, 'running', 'o painel nao deve marcar como running um servico que nao iniciou');
+  });
+  check('health check identifica quem responde na porta', () => {
+    const detail = manager.getState()[watched.id].healthDetail;
+    assert.ok(detail, 'sem detalhe do health check');
+    assert.ok(detail.owner, 'health check nao informou o dono da porta');
+    assert.ok(detail.owner.pid > 0, 'dono da porta sem pid');
+  });
+
+  external.kill();
+  await waitFor(
+    () => manager.getState()[watched.id]?.health === 'unhealthy',
+    15000,
+    'health check detectando a queda do servico externo'
+  );
+  check('painel detectou que o servico externo caiu', () => {
+    assert.strictEqual(manager.getState()[watched.id].health, 'unhealthy');
+  });
+
+  manager.remove(watched.id);
+
   manager.dispose();
   fs.rmSync(tmp, { recursive: true, force: true });
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} verificacoes passaram\n`);
   if (failed.length) process.exit(1);
+}
+
+/** Verifica se ha algo escutando na porta local. */
+function isPortListening(port) {
+  const net = require('node:net');
+  return new Promise((resolve) => {
+    const socket = net.connect({ port, host: '127.0.0.1' });
+    const timer = setTimeout(() => {
+      socket.destroy();
+      resolve(false);
+    }, 700);
+    socket.once('connect', () => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once('error', () => {
+      clearTimeout(timer);
+      resolve(false);
+    });
+  });
 }
 
 /** Procura outra instalacao de node (nvm, nodejs padrao) para o teste de paralelismo. */

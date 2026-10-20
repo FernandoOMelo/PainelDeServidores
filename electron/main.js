@@ -79,7 +79,25 @@ function createWindow() {
     mainWindow.webContents.on('did-fail-load', (_event, code, description, url) => {
       console.error(`[renderer] falha ao carregar ${url}: ${description} (${code})`);
     });
+    mainWindow.webContents.on('did-finish-load', () => {
+      console.log('[renderer] pagina carregada');
+    });
+    mainWindow.webContents.on('preload-error', (_event, file, error) => {
+      console.error(`[renderer] erro no preload ${file}:`, error);
+    });
+    mainWindow.webContents.on('render-process-gone', (_event, details) => {
+      console.error('[renderer] processo do renderer encerrado:', JSON.stringify(details));
+    });
   }
+
+  // Rede de seguranca: se o renderer travar antes de pintar, a janela
+  // aparece mesmo assim (com o estado vazio) em vez de ficar invisivel.
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      mainWindow.show();
+      console.warn('[app] janela exibida por fallback (renderer nao sinalizou ready-to-show)');
+    }
+  }, 5000).unref?.();
 
   mainWindow.on('close', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
