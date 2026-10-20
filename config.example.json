@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "settings": {
+    "logBufferLines": 2000,
+    "metricsIntervalMs": 2000,
+    "autoStart": true
+  },
+  "services": [
+    {
+      "id": "demo-api",
+      "name": "API Demonstração",
+      "group": "Exemplos",
+      "command": "node",
+      "args": ["examples/api-demo.js"],
+      "cwd": "",
+      "env": {
+        "PORT": "45999"
+      },
+      "shell": false,
+      "autostart": false,
+      "monitorOnly": false,
+      "health": {
+        "type": "http",
+        "port": 45999,
+        "path": "/",
+        "expectStatus": 200,
+        "intervalMs": 3000,
+        "timeoutMs": 2000,
+        "graceMs": 1500,
+        "failuresBeforeUnhealthy": 3
+      },
+      "restart": {
+        "enabled": true,
+        "maxRetries": 5,
+        "backoffMs": 1000,
+        "maxBackoffMs": 30000,
+        "restartOnUnhealthy": true,
+        "stabilityMs": 60000
+      },
+      "createdAt": "2026-10-20T11:00:00.000Z"
+    }
+  ]
+}
