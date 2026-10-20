@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;"
+    />
+    <title>Painel de Servidores</title>
+    <link rel="stylesheet" href="app://bundle/src/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <h1>Painel de Servidores</h1>
+            <p class="brand-sub" id="brand-sub">carregando...</p>
+          </div>
+        </div>
+
+        <div class="stats" id="stats"></div>
+
+        <div class="topbar-actions">
+          <button class="btn btn-ghost" id="btn-discover" title="Procurar servidores ja rodando na maquina">
+            <span class="ico">&#9673;</span> Descobrir
+          </button>
+          <button class="btn btn-ghost" id="btn-start-all">Iniciar todos</button>
+          <button class="btn btn-ghost" id="btn-stop-all">Parar todos</button>
+          <button class="btn btn-primary" id="btn-new">+ Novo servico</button>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <main class="services-area">
+          <div class="toolbar">
+            <div class="search">
+              <span class="ico">&#128269;</span>
+              <input type="search" id="search" placeholder="Filtrar por nome, grupo ou comando..." autocomplete="off" />
+            </div>
+            <div class="chips" id="group-filter"></div>
+            <div class="toolbar-right">
+              <label class="switch-label">
+                <input type="checkbox" id="only-running" />
+                <span>Somente ativos</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="grid" id="services-grid"></div>
+
+          <div class="empty-state" id="empty-state" hidden>
+            <div class="empty-icon">&#9881;</div>
+            <h2>Nenhum servico cadastrado</h2>
+            <p>Cadastre um servidor para controlar e monitorar pela interface.</p>
+            <button class="btn btn-primary" id="btn-empty-new">+ Cadastrar servico</button>
+          </div>
+        </main>
+
+        <aside class="log-panel" id="log-panel">
+          <div class="log-head">
+            <div class="log-title">
+              <h2 id="log-title">Logs</h2>
+              <span class="log-sub" id="log-sub">selecione um servico</span>
+            </div>
+            <div class="log-actions">
+              <label class="switch-label compact">
+                <input type="checkbox" id="autoscroll" checked />
+                <span>Auto-scroll</span>
+              </label>
+              <button class="btn btn-icon" id="btn-clear-logs" title="Limpar buffer">&#128465;</button>
+            </div>
+          </div>
+          <div class="log-filter">
+            <input type="search" id="log-search" placeholder="Filtrar linhas do log..." autocomplete="off" />
+          </div>
+          <div class="log-body" id="log-body">
+            <div class="log-placeholder">
+              <p>Selecione um servico para ver a saida em tempo real.</p>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <div id="modal-root"></div>
+    <div id="toast-root" class="toast-root"></div>
+
+    <script type="module" src="app://bundle/src/js/app.js"></script>
+  </body>
+</html>
