@@ -1,6 +1,7 @@
 import { el } from './util.js';
 import { openModal, field, input, numberInput, select, checkbox } from './modal.js';
 import { parseEnv, stringifyEnv, splitArgs } from './util.js';
+import { api } from './api.js';
 
 const DEFAULT_SERVICE = {
   name: '',
@@ -51,7 +52,6 @@ export function openServiceForm(service, onSubmit) {
     : structuredClone(DEFAULT_SERVICE);
 
   const isEdit = Boolean(service);
-  const api = window.api;
 
   /* ---------------------------------------------------------------- */
   /* Identificacao                                                    */

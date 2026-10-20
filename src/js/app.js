@@ -5,8 +5,8 @@ import { LogPanel } from './log-panel.js';
 import { Dashboard } from './dashboard.js';
 import { confirmDialog, closeModal } from './modal.js';
 import { toast } from './toast.js';
+import { api } from './api.js';
 
-const api = window.api;
 
 /** Baldes de status: a mesma classificacao vale para o filtro e para os contadores. */
 const STATUS_BUCKETS = [

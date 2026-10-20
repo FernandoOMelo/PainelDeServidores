@@ -3,7 +3,7 @@
   "settings": {
     "logBufferLines": 2000,
     "metricsIntervalMs": 2000,
-    "autoStart": true
+    "autoStart": false
   },
   "services": [
     {
@@ -14,12 +14,15 @@
       "command": "node",
       "args": ["examples/api-demo.js"],
       "cwd": "",
-      "env": { "PORT": "45999" },
+      "env": {
+        "PORT": "45999"
+      },
       "shell": false,
       "autostart": false,
       "monitorOnly": false,
       "nodePath": "",
       "container": "",
+      "service": "",
       "health": {
         "type": "http",
         "port": 45999,
@@ -38,10 +41,10 @@
         "restartOnUnhealthy": true,
         "stabilityMs": 60000
       },
-      "createdAt": "2026-10-20T11:00:00.000Z"
+      "createdAt": "2026-01-01T00:00:00.000Z"
     },
     {
-      "id": "servico-node-legado",
+      "id": "servico-node-proprio",
       "name": "Serviço com Node 18 (versão própria)",
       "group": "Exemplos",
       "type": "processo",
@@ -54,6 +57,7 @@
       "monitorOnly": false,
       "nodePath": "C:\\Users\\ferna\\AppData\\Local\\nvm\\v18.20.8\\node.exe",
       "container": "",
+      "service": "",
       "health": {
         "type": "tcp",
         "port": 3000,
@@ -72,7 +76,7 @@
         "restartOnUnhealthy": true,
         "stabilityMs": 60000
       },
-      "createdAt": "2026-10-20T11:30:00.000Z"
+      "createdAt": "2026-01-01T00:00:00.000Z"
     },
     {
       "id": "container-exemplo",
@@ -88,6 +92,7 @@
       "monitorOnly": false,
       "nodePath": "",
       "container": "gameshelfproject-api-1",
+      "service": "",
       "health": {
         "type": "none",
         "port": null,
@@ -106,7 +111,42 @@
         "restartOnUnhealthy": false,
         "stabilityMs": 60000
       },
-      "createdAt": "2026-10-20T12:00:00.000Z"
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "servico-windows-exemplo",
+      "name": "Serviço do Windows (somente monitorar)",
+      "group": "GalileoPlus",
+      "type": "servico",
+      "command": "",
+      "args": [],
+      "cwd": "",
+      "env": {},
+      "shell": false,
+      "autostart": false,
+      "monitorOnly": true,
+      "nodePath": "",
+      "container": "",
+      "service": "galileo_one_api",
+      "health": {
+        "type": "none",
+        "port": null,
+        "path": "/",
+        "expectStatus": 200,
+        "intervalMs": 5000,
+        "timeoutMs": 3000,
+        "graceMs": 0,
+        "failuresBeforeUnhealthy": 3
+      },
+      "restart": {
+        "enabled": false,
+        "maxRetries": 0,
+        "backoffMs": 1000,
+        "maxBackoffMs": 30000,
+        "restartOnUnhealthy": false,
+        "stabilityMs": 60000
+      },
+      "createdAt": "2026-01-01T00:00:00.000Z"
     }
   ]
 }

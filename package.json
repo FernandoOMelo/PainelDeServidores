@@ -1,53 +1,18 @@
 {
-  "name": "painel-servidores",
+  "name": "painel-de-servidores",
   "version": "1.0.0",
   "private": true,
-  "description": "Painel desktop para iniciar, parar e monitorar servidores locais",
-  "main": "electron/main.js",
+  "description": "Painel para iniciar, parar e monitorar servidores locais",
+  "license": "MIT",
+  "author": "Fernando O. Melo",
   "scripts": {
-    "start": "electron .",
-    "dev": "electron . --dev",
-    "test": "node scripts/selftest.js",
-    "build": "electron-builder --win --dir",
-    "build:exe": "electron-builder --win portable"
-  },
-  "build": {
-    "appId": "br.com.fernandomeelo.paineldeservidores",
-    "productName": "Painel de Servidores",
-    "copyright": "Copyright (c) 2026 Fernando O. Melo",
-    "asar": false,
-    "directories": {
-      "output": "dist"
-    },
-    "files": [
-      "electron/**/*",
-      "src/**/*",
-      "assets/**/*",
-      "package.json"
-    ],
-    "win": {
-      "icon": "assets/icon.png",
-      "target": [
-        {
-          "target": "dir",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
-    },
-    "portable": {
-      "artifactName": "PainelDeServidores.exe"
-    }
+    "build": "cargo build --release --manifest-path src-tauri/Cargo.toml",
+    "build:exe": "cargo build --release --manifest-path src-tauri/Cargo.toml",
+    "dev": "cargo run --manifest-path src-tauri/Cargo.toml",
+    "test": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "tauri": "tauri"
   },
   "devDependencies": {
-    "electron": "^44.9.1",
-    "electron-builder": "^26.15.3"
+    "@tauri-apps/cli": "^2.9.1"
   }
 }

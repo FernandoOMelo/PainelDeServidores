@@ -1,6 +1,7 @@
 node_modules/
 logs/
 dist/
+src-tauri/target/
 config.local.json
 *.corrompido-*
 .DS_Store
