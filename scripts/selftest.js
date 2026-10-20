@@ -11,6 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
 const assert = require('node:assert');
+const { execFile } = require('node:child_process');
 
 const { Store } = require('../electron/store');
 const { ServiceManager } = require('../electron/service-manager');
@@ -139,12 +140,167 @@ async function main() {
     assert.strictEqual(manager.getService(server.id), null);
   });
 
+  console.log('\n== 8. Node customizado por servico ==');
+  const customNode = manager.create({
+    name: 'Servico com node proprio',
+    command: 'node',
+    args: ['-e', 'console.log("VERSAO=" + process.version)'],
+    nodePath: process.execPath,
+    health: { type: 'none' },
+  });
+  manager.start(customNode.id);
+  await waitFor(
+    () => manager.getLogs(customNode.id).some((l) => l.text.startsWith('VERSAO=')),
+    10000,
+    'log do node customizado'
+  );
+  check('servico com node customizado executou', () => {
+    const logs = manager.getLogs(customNode.id).map((l) => l.text).join('\n');
+    assert.ok(/VERSAO=v/.test(logs), `esperado VERSAO=v..., veio: ${logs.slice(0, 200)}`);
+  });
+  check('versao do node detectada e exposta no estado', async () => {
+    const state = manager.getState()[customNode.id];
+    assert.ok(state.nodeVersion, 'nodeVersion nao informado');
+    assert.ok(state.nodeVersion.startsWith('v'), `versao inesperada: ${state.nodeVersion}`);
+  });
+  await manager.stop(customNode.id);
+  await waitFor(() => manager.getState()[customNode.id]?.state === 'stopped', 8000, 'node customizado parado');
+  manager.remove(customNode.id);
+
+  const otherNode = findAlternateNode(process.execPath);
+  if (otherNode) {
+    console.log(`   (alternativa encontrada: ${otherNode})`);
+    const a = manager.create({
+      name: 'Node A',
+      command: 'node',
+      args: ['-e', 'console.log("VERSAO=" + process.version)'],
+      nodePath: process.execPath,
+    });
+    const b = manager.create({
+      name: 'Node B',
+      command: 'node',
+      args: ['-e', 'console.log("VERSAO=" + process.version)'],
+      nodePath: otherNode,
+    });
+    manager.start(a.id);
+    manager.start(b.id);
+    await waitFor(
+      () =>
+        manager.getState()[a.id]?.nodeVersion &&
+        manager.getState()[b.id]?.nodeVersion &&
+        manager.getLogs(a.id).some((l) => l.text.startsWith('VERSAO=')) &&
+        manager.getLogs(b.id).some((l) => l.text.startsWith('VERSAO=')),
+      15000,
+      'duas versoes de node em paralelo'
+    );
+    check('duas versoes de node rodam em paralelo com versoes distintas', () => {
+      const versionA = manager.getState()[a.id].nodeVersion;
+      const versionB = manager.getState()[b.id].nodeVersion;
+      assert.ok(versionA && versionB, `versoes ausentes: ${versionA} / ${versionB}`);
+      assert.notStrictEqual(versionA, versionB, `as duas versoes should differ: ${versionA} vs ${versionB}`);
+    });
+    await manager.stop(a.id);
+    await manager.stop(b.id);
+    manager.remove(a.id);
+    manager.remove(b.id);
+  } else {
+    console.log('   (nenhuma versao alternativa de node encontrada - pulando o teste de paralelismo)');
+  }
+
+  console.log('\n== 9. Docker ==');
+  const dockerStatus = await manager.docker.availability();
+  check('docker CLI responde', () => {
+    assert.strictEqual(dockerStatus.ok, true, dockerStatus.error);
+  });
+
+  if (dockerStatus.ok) {
+    const containerName = `painel-selftest-${process.pid}`;
+    await runDocker(['rm', '-f', containerName]);
+    await runDocker(['run', '-d', '--name', containerName, 'alpine:latest', 'sleep', '300']);
+
+    const container = manager.create({
+      name: 'Container de teste',
+      type: 'docker',
+      container: containerName,
+    });
+    manager.start(container.id);
+    await waitFor(
+      () => manager.getState()[container.id]?.containerState === 'running',
+      25000,
+      'container rodando'
+    );
+    check('container subiu e o estado foi detectado', () => {
+      const state = manager.getState()[container.id];
+      assert.strictEqual(state.state, 'running');
+      assert.strictEqual(state.containerState, 'running');
+    });
+
+    const metricsSeen = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), 20000);
+      manager.on('metrics', (payload) => {
+        const sample = payload.find((p) => p.id === container.id);
+        if (sample) {
+          clearTimeout(timer);
+          resolve(sample);
+        }
+      });
+    });
+    check('metricas do container coletadas (cpu/memoria)', () => {
+      assert.ok(metricsSeen, 'nenhuma amostra de metricas do container');
+      assert.ok(typeof metricsSeen.cpu === 'number');
+      assert.ok(typeof metricsSeen.mem === 'number');
+    });
+
+    await manager.stop(container.id);
+    await waitFor(() => manager.getState()[container.id]?.state === 'stopped', 25000, 'container parado');
+    check('container foi encerrado', () => {
+      assert.strictEqual(manager.getState()[container.id].state, 'stopped');
+    });
+
+    manager.remove(container.id);
+    await runDocker(['rm', '-f', containerName]);
+  }
+
   manager.dispose();
   fs.rmSync(tmp, { recursive: true, force: true });
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} verificacoes passaram\n`);
   if (failed.length) process.exit(1);
+}
+
+/** Procura outra instalacao de node (nvm, nodejs padrao) para o teste de paralelismo. */
+function findAlternateNode(currentExe) {
+  const candidates = [];
+  const roots = [process.env.NVM_HOME, path.join(os.homedir(), 'AppData', 'Local', 'nvm'), 'C:\\nvm4w']
+    .filter(Boolean);
+
+  for (const root of roots) {
+    try {
+      for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const exe = path.join(root, entry.name, 'node.exe');
+        if (fs.existsSync(exe)) candidates.push(exe);
+      }
+    } catch {
+      /* raiz inacessivel */
+    }
+  }
+  candidates.push('C:\\Program Files\\nodejs\\node.exe');
+
+  return candidates.find((exe) => {
+    try {
+      return path.resolve(exe) !== path.resolve(currentExe) && fs.existsSync(exe);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function runDocker(args) {
+  return new Promise((resolve) => {
+    execFile('docker', args, { windowsHide: true, timeout: 60000 }, () => resolve());
+  });
 }
 
 main().catch((err) => {
