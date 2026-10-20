@@ -32,6 +32,7 @@ class ServiceManager extends EventEmitter {
       intervalMs: store.getSetting('metricsIntervalMs', 2000),
       dir: options.tempDir,
     });
+    this.windowActive = false;
 
     this.metrics.on('metrics', (payload) => this.emit('metrics', payload));
   }
@@ -46,7 +47,10 @@ class ServiceManager extends EventEmitter {
       if (!this.runners.has(service.id)) this.#attach(service);
     }
 
-    this.metrics.start();
+    // A coleta de metricas so roda com a janela aberta: ela existe para
+    // alimentar a interface e custa ~80 MB de um interpretador PowerShell.
+    // Na bandeja, o app economiza esse processo inteiro.
+    this.metrics.setPids([]);
     this.#syncPids();
 
     for (const service of this.services) {
@@ -67,6 +71,29 @@ class ServiceManager extends EventEmitter {
           });
         }
       });
+    }
+  }
+
+  /**
+   * A interface abriu ou fechou.
+   *
+   * Com a janela fechada, nada que exista so para exibicao precisa rodar:
+   * o coletor de metricas (PowerShell) e as consultas de recurso do Docker
+   * (docker.exe) sao pausados.
+   */
+  setWindowActive(active) {
+    if (this.windowActive === active) return;
+    this.windowActive = active;
+
+    if (active) {
+      this.metrics.start();
+      this.#syncPids();
+    } else {
+      this.metrics.stop();
+    }
+
+    for (const runner of this.runners.values()) {
+      runner.setDisplayMode?.(active);
     }
   }
 

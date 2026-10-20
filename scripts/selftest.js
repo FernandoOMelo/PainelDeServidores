@@ -48,6 +48,9 @@ async function main() {
   const store = new Store(path.join(tmp, 'config.json'));
   const manager = new ServiceManager(store, { logDir: path.join(tmp, 'logs'), tempDir: tmp, appRoot: tmp });
   manager.init();
+  // A coleta de metricas so roda com a interface aberta (e o que economiza
+  // ~80 MB de um PowerShell quando o app fica so na bandeja).
+  manager.setWindowActive(true);
 
   console.log('\n== 1. Ciclo de vida ==');
   const server = manager.create({

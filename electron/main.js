@@ -12,6 +12,12 @@ const { listListeningPorts, isPortOpen } = require('./discovery');
 const APP_ROOT = path.resolve(__dirname, '..');
 const IS_DEV = !app.isPackaged;
 
+// Um painel de servicos nao precisa de GPU: desativar a aceleracao de
+// hardware economiza cerca de 60 MB (o processo de GPU sobe mesmo assim).
+// Como o 'ready-to-show' deixa de disparar nesse modo, a janela e exibida
+// no 'dom-ready'.
+app.disableHardwareAcceleration();
+
 /**
  * Onde ficam os logs e a configuracao.
  *
@@ -73,6 +79,11 @@ function createWindow({ show = true } = {}) {
   mainWindow.once('ready-to-show', () => {
     if (show) mainWindow.show();
   });
+
+  // A coleta de metricas so faz sentido com a janela aberta.
+  mainWindow.on('show', () => manager?.setWindowActive(true));
+  mainWindow.on('hide', () => manager?.setWindowActive(false));
+  mainWindow.on('closed', () => manager?.setWindowActive(false));
 
   // Com renderizacao por software o 'ready-to-show' pode nao disparar, e a
   // janela so apareceria no fallback de 5s. O 'dom-ready' chega antes e a
@@ -309,6 +320,7 @@ app.whenReady().then(() => {
   // renderer ficaria aberto (~120 MB) sem ninguem vendo.
   const startedHidden = process.argv.includes('--hidden');
   if (!startedHidden) createWindow({ show: true });
+  else manager.setWindowActive(false);
 
   app.on('activate', () => showWindow());
 });
