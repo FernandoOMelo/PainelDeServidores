@@ -482,6 +482,21 @@ body {
   letter-spacing: 0.2px;
 }
 
+.tag-accent {
+  background: rgba(59, 130, 246, 0.16);
+  color: #93c5fd;
+  font-family: var(--mono);
+}
+
+.tag-accent:empty {
+  display: none;
+}
+
+.tag-warn {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fcd34d;
+}
+
 .badge {
   padding: 3px 9px;
   border-radius: 999px;
@@ -970,6 +985,17 @@ select {
   font-weight: 600;
   color: #93c5fd;
   min-width: 62px;
+}
+
+.discovery-item .container-name {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #93c5fd;
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .discovery-item .proc {

@@ -5,6 +5,7 @@ import { parseEnv, stringifyEnv, splitArgs } from './util.js';
 const DEFAULT_SERVICE = {
   name: '',
   group: 'Geral',
+  type: 'processo',
   command: '',
   args: [],
   cwd: '',
@@ -12,6 +13,8 @@ const DEFAULT_SERVICE = {
   shell: false,
   autostart: false,
   monitorOnly: false,
+  nodePath: '',
+  container: '',
   health: {
     type: 'none',
     port: '',
@@ -48,16 +51,27 @@ export function openServiceForm(service, onSubmit) {
     : structuredClone(DEFAULT_SERVICE);
 
   const isEdit = Boolean(service);
+  const api = window.api;
 
-  // --- campos ---
+  /* ---------------------------------------------------------------- */
+  /* Identificacao                                                    */
+  /* ---------------------------------------------------------------- */
+
   const nameInput = input({ value: data.name, placeholder: 'API Principal' });
-  const groupInput = input({ value: data.group, placeholder: 'Geral', list: 'group-options' });
-  const commandInput = input({
-    value: data.command,
-    placeholder: 'npm',
-    class: 'mono',
-    spellcheck: false,
-  });
+  const groupInput = input({ value: data.group, placeholder: 'Geral' });
+  const typeSelect = select(
+    [
+      { value: 'processo', label: 'Processo local (node, python, dotnet...)' },
+      { value: 'docker', label: 'Container Docker' },
+    ],
+    data.type
+  );
+
+  /* ---------------------------------------------------------------- */
+  /* Servico de processo                                               */
+  /* ---------------------------------------------------------------- */
+
+  const commandInput = input({ value: data.command, placeholder: 'npm', class: 'mono', spellcheck: false });
   const argsInput = input({
     value: Array.isArray(data.args) ? data.args.join(' ') : data.args || '',
     placeholder: 'run dev',
@@ -77,14 +91,112 @@ export function openServiceForm(service, onSubmit) {
   });
   envInput.value = stringifyEnv(data.env);
 
+  const nodePathInput = input({
+    value: data.nodePath || '',
+    placeholder: 'C:\\Users\\...\\nvm\\v18.20.8\\node.exe',
+    class: 'mono',
+    spellcheck: false,
+  });
+  const nodeVersionHint = el('div', { class: 'hint' });
+
   const shellCheck = checkbox('Executar atraves do shell do sistema', data.shell);
   const autostartCheck = checkbox('Iniciar automaticamente ao abrir o app', data.autostart);
-  const monitorOnlyCheck = checkbox(
-    'Somente monitorar (nao iniciar/parar este servico)',
-    data.monitorOnly
-  );
+  const monitorOnlyCheck = checkbox('Somente monitorar (nao iniciar/parar este servico)', data.monitorOnly);
 
-  // --- health check ---
+  // Detecta a versao do node escolhido, com debounce.
+  let nodeTimer = null;
+  const detectNode = async () => {
+    const value = nodePathInput.value.trim();
+    if (!value) {
+      nodeVersionHint.textContent = 'Vazio usa o node do PATH do sistema.';
+      nodeVersionHint.style.color = '';
+      return;
+    }
+    nodeVersionHint.textContent = 'Detectando versao...';
+    nodeVersionHint.style.color = '';
+    try {
+      const version = await api.node.version(value);
+      if (version) {
+        nodeVersionHint.textContent = `Usara o node ${version} (a pasta dele entra no PATH do servico).`;
+        nodeVersionHint.style.color = 'var(--ok)';
+      } else {
+        nodeVersionHint.textContent = 'Nao foi possivel ler a versao nesse caminho.';
+        nodeVersionHint.style.color = 'var(--danger)';
+      }
+    } catch {
+      nodeVersionHint.textContent = 'Nao foi possivel ler a versao nesse caminho.';
+      nodeVersionHint.style.color = 'var(--danger)';
+    }
+  };
+  nodePathInput.addEventListener('input', () => {
+    clearTimeout(nodeTimer);
+    nodeTimer = setTimeout(detectNode, 400);
+  });
+
+  const processSection = el('div', {}, [
+    field('Comando', commandInput, 'Executavel a ser chamado (ex.: npm, node, python, dotnet).'),
+    field('Argumentos', argsInput, 'Separados por espaco. Use aspas para argumentos com espaco.'),
+    field('Diretorio de trabalho', cwdInput, 'Onde o comando sera executado. Vazio usa a pasta do app.'),
+    field(
+      'Node do servico',
+      nodePathInput,
+      'Caminho do node.exe (ou da pasta que o contem) quando este servico usa uma versao propria.'
+    ),
+    nodeVersionHint,
+    field('Variaveis de ambiente', envInput, 'Uma por linha, no formato CHAVE=VALOR.'),
+    el('div', { class: 'checks' }, [shellCheck, autostartCheck, monitorOnlyCheck]),
+  ]);
+
+  /* ---------------------------------------------------------------- */
+  /* Servico Docker                                                    */
+  /* ---------------------------------------------------------------- */
+
+  const containerInput = input({
+    value: data.container || '',
+    placeholder: 'gameshelfproject-api-1',
+    class: 'mono',
+    spellcheck: false,
+    list: 'container-list',
+  });
+  const containerList = el('datalist', { id: 'container-list' });
+  const dockerStatus = el('div', { class: 'hint' });
+  const dockerAutostartCheck = checkbox('Iniciar automaticamente ao abrir o app', data.autostart);
+  const dockerMonitorOnlyCheck = checkbox('Somente monitorar (nao iniciar/parar este container)', data.monitorOnly);
+
+  const dockerSection = el('div', {}, [
+    field('Container', containerInput, 'Nome do container (como aparece no `docker ps`).'),
+    containerList,
+    dockerStatus,
+    el('div', { class: 'checks' }, [dockerAutostartCheck, dockerMonitorOnlyCheck]),
+  ]);
+
+  let containersLoaded = false;
+  const loadContainers = async () => {
+    if (containersLoaded) return;
+    containersLoaded = true;
+    try {
+      const status = await api.docker.status();
+      if (!status.ok) {
+        dockerStatus.textContent = `Docker indisponivel: ${status.error}`;
+        dockerStatus.style.color = 'var(--danger)';
+        return;
+      }
+      const list = await api.docker.containers();
+      containerList.replaceChildren(
+        ...list.map((c) => el('option', { value: c.name, label: `${c.image} - ${c.status}` }))
+      );
+      dockerStatus.textContent = `Docker ${status.version} - ${list.length} container(s) encontrado(s).`;
+      dockerStatus.style.color = 'var(--text-faint)';
+    } catch (err) {
+      dockerStatus.textContent = `Falha ao listar containers: ${err.message}`;
+      dockerStatus.style.color = 'var(--danger)';
+    }
+  };
+
+  /* ---------------------------------------------------------------- */
+  /* Health check e recuperacao                                        */
+  /* ---------------------------------------------------------------- */
+
   const healthType = select(
     [
       { value: 'none', label: 'Nenhum' },
@@ -102,10 +214,7 @@ export function openServiceForm(service, onSubmit) {
   const failuresInput = numberInput({ value: data.health.failuresBeforeUnhealthy, min: 1, max: 20 });
 
   const healthFields = el('div', { class: 'fieldset-hidden' }, [
-    el('div', { class: 'row' }, [
-      field('Porta', portInput),
-      field('Caminho (HTTP)', pathInput),
-    ]),
+    el('div', { class: 'row' }, [field('Porta', portInput), field('Caminho (HTTP)', pathInput)]),
     el('div', { class: 'row' }, [
       field('Status esperado (0 = qualquer 2xx/3xx)', statusInput),
       field('Intervalo (ms)', intervalInput),
@@ -124,8 +233,7 @@ export function openServiceForm(service, onSubmit) {
   healthType.addEventListener('change', toggleHealthFields);
   toggleHealthFields();
 
-  // --- reinicio automatico ---
-  const restartEnabled = checkbox('Reiniciar automaticamente quando o processo cair', data.restart.enabled);
+  const restartEnabled = checkbox('Reiniciar automaticamente quando o servico cair', data.restart.enabled);
   const maxRetriesInput = numberInput({ value: data.restart.maxRetries, min: 0, max: 100 });
   const backoffInput = numberInput({ value: data.restart.backoffMs, min: 100, step: 500 });
   const maxBackoffInput = numberInput({ value: data.restart.maxBackoffMs, min: 100, step: 1000 });
@@ -148,21 +256,40 @@ export function openServiceForm(service, onSubmit) {
     restartFields.classList.toggle('fieldset-hidden', !event.target.checked);
   });
 
+  const healthSection = el('div', { class: 'section' }, [
+    el('div', { class: 'section-title', text: 'Verificacao de saude' }),
+    field('Tipo', healthType),
+    healthFields,
+  ]);
+
+  const dockerHealthNote = el('div', {
+    class: 'hint',
+    text: 'Containers usam o HEALTHCHECK proprio do Docker. O painel mostra o status e reinicia o container se ele sair com erro.',
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* Montagem                                                         */
+  /* ---------------------------------------------------------------- */
+
+  const toggleType = () => {
+    const isDocker = typeSelect.value === 'docker';
+    processSection.classList.toggle('fieldset-hidden', isDocker);
+    dockerSection.classList.toggle('fieldset-hidden', !isDocker);
+    healthSection.classList.toggle('fieldset-hidden', isDocker);
+    dockerHealthNote.classList.toggle('fieldset-hidden', !isDocker);
+    if (isDocker) loadContainers();
+  };
+  typeSelect.addEventListener('change', toggleType);
+
   const errorText = el('div', { class: 'error-text' });
 
   const body = el('div', {}, [
     el('div', { class: 'row' }, [field('Nome', nameInput), field('Grupo', groupInput)]),
-    field('Comando', commandInput, 'Executavel a ser chamado (ex.: npm, node, python, dotnet).'),
-    field('Argumentos', argsInput, 'Separados por espaco. Use aspas para argumentos com espaco.'),
-    field('Diretorio de trabalho', cwdInput, 'Onde o comando sera executado. Vazio usa a pasta do app; caminho relativo e resolvido a partir dela.'),
-    field('Variaveis de ambiente', envInput, 'Uma por linha, no formato CHAVE=VALOR.'),
-    el('div', { class: 'checks' }, [shellCheck, autostartCheck, monitorOnlyCheck]),
-
-    el('div', { class: 'section' }, [
-      el('div', { class: 'section-title', text: 'Verificacao de saude' }),
-      field('Tipo', healthType),
-      healthFields,
-    ]),
+    field('Tipo de servico', typeSelect),
+    processSection,
+    dockerSection,
+    healthSection,
+    dockerHealthNote,
 
     el('div', { class: 'section' }, [
       el('div', { class: 'section-title', text: 'Recuperacao automatica' }),
@@ -173,23 +300,35 @@ export function openServiceForm(service, onSubmit) {
     errorText,
   ]);
 
-  const submitBtn = el('button', { class: 'btn btn-primary', text: isEdit ? 'Salvar alteracoes' : 'Cadastrar servico' });
+  const submitBtn = el('button', {
+    class: 'btn btn-primary',
+    text: isEdit ? 'Salvar alteracoes' : 'Cadastrar servico',
+  });
 
   const submit = async () => {
     const name = nameInput.value.trim();
-    const command = commandInput.value.trim();
+    const type = typeSelect.value;
+    const isDocker = type === 'docker';
 
     if (!name) {
       errorText.textContent = 'Informe um nome para o servico.';
       nameInput.focus();
       return;
     }
-    if (!data.monitorOnly && !command) {
+
+    if (isDocker && !containerInput.value.trim()) {
+      errorText.textContent = 'Informe o nome do container Docker.';
+      containerInput.focus();
+      return;
+    }
+
+    if (!isDocker && !commandInput.value.trim()) {
       errorText.textContent = 'Informe o comando que inicia o servico.';
       commandInput.focus();
       return;
     }
-    if (healthType.value !== 'none') {
+
+    if (!isDocker && healthType.value !== 'none') {
       const port = Number(portInput.value);
       if (!port || port < 1 || port > 65535) {
         errorText.textContent = 'Informe uma porta valida para a verificacao de saude.';
@@ -206,16 +345,19 @@ export function openServiceForm(service, onSubmit) {
       id: data.id,
       name,
       group: groupInput.value.trim() || 'Geral',
-      command,
-      args: splitArgs(argsInput.value),
-      cwd: cwdInput.value.trim(),
-      env: parseEnv(envInput.value),
-      shell: shellCheck.querySelector('input').checked,
-      autostart: autostartCheck.querySelector('input').checked,
-      monitorOnly: monitorOnlyCheck.querySelector('input').checked,
+      type,
+      command: isDocker ? '' : commandInput.value.trim(),
+      args: isDocker ? [] : splitArgs(argsInput.value),
+      cwd: isDocker ? '' : cwdInput.value.trim(),
+      env: isDocker ? {} : parseEnv(envInput.value),
+      shell: isDocker ? false : shellCheck.querySelector('input').checked,
+      autostart: (isDocker ? dockerAutostartCheck : autostartCheck).querySelector('input').checked,
+      monitorOnly: (isDocker ? dockerMonitorOnlyCheck : monitorOnlyCheck).querySelector('input').checked,
+      nodePath: isDocker ? '' : nodePathInput.value.trim(),
+      container: isDocker ? containerInput.value.trim() : '',
       health: {
-        type: healthType.value,
-        port: healthType.value === 'none' ? null : Number(portInput.value),
+        type: isDocker ? 'none' : healthType.value,
+        port: isDocker || healthType.value === 'none' ? null : Number(portInput.value),
         path: pathInput.value.trim() || '/',
         expectStatus: Number(statusInput.value) || 200,
         intervalMs: Number(intervalInput.value) || 5000,
@@ -265,6 +407,9 @@ export function openServiceForm(service, onSubmit) {
     footer,
     wide: true,
   });
+
+  toggleType();
+  if (typeSelect.value !== 'docker' && data.nodePath) detectNode();
 
   return modal;
 }

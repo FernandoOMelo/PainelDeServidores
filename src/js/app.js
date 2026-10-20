@@ -48,9 +48,13 @@ function createCard(service) {
   const dot = el('span', { class: 'dot' });
   const name = el('h3', { text: service.name, title: service.name });
   const groupTag = el('span', { class: 'tag', text: service.group });
+  const runtimeTag = el('span', { class: 'tag tag-accent' });
+  const readonlyTag = el('span', { class: 'tag tag-warn', text: 'somente leitura' });
+  readonlyTag.hidden = !service.monitorOnly;
   const badge = el('span', { class: 'badge stopped', text: 'Parado' });
   const cmd = el('div', { class: 'cmd' });
   const portValue = el('dd', { text: '--' });
+  const pidLabel = el('dt', { text: 'PID' });
   const pidValue = el('dd', { text: '--' });
   const cpuValue = el('dd', { text: '--' });
   const memValue = el('dd', { text: '--' });
@@ -66,13 +70,16 @@ function createCard(service) {
   const node = el('article', { class: 'card', dataset: { id: service.id } }, [
     el('div', { class: 'card-head' }, [
       dot,
-      el('div', { class: 'card-title' }, [name, el('div', { class: 'card-sub' }, [groupTag])]),
+      el('div', { class: 'card-title' }, [
+        name,
+        el('div', { class: 'card-sub' }, [groupTag, runtimeTag, readonlyTag]),
+      ]),
       badge,
     ]),
     cmd,
     el('dl', { class: 'meta' }, [
       el('div', {}, [el('dt', { text: 'Porta' }), portValue]),
-      el('div', {}, [el('dt', { text: 'PID' }), pidValue]),
+      el('div', {}, [pidLabel, pidValue]),
       el('div', {}, [el('dt', { text: 'CPU' }), cpuValue]),
       el('div', {}, [el('dt', { text: 'Memoria' }), memValue]),
     ]),
@@ -103,7 +110,9 @@ function createCard(service) {
     dot,
     badge,
     cmd,
+    runtimeTag,
     portValue,
+    pidLabel,
     pidValue,
     cpuValue,
     memValue,
@@ -123,6 +132,7 @@ function paintCard(service) {
 
   const runtime = state.runtime[service.id] || { state: 'stopped' };
   const status = runtime.state || 'stopped';
+  const isDocker = service.type === 'docker';
 
   refs.node.dataset.status = status;
   refs.node.classList.toggle('selected', state.selectedId === service.id);
@@ -130,12 +140,28 @@ function paintCard(service) {
   refs.badge.className = `badge ${status}`;
   refs.badge.textContent = STATE_LABELS[status] || status;
 
-  const parts = [service.command, ...(service.args || [])].filter(Boolean);
-  refs.cmd.textContent = parts.length ? parts.join(' ') : '(somente monitorar)';
-  refs.cmd.title = refs.cmd.textContent;
-
-  refs.portValue.textContent = service.health?.port ? service.health.port : '--';
-  refs.pidValue.textContent = runtime.pid ?? '--';
+  if (isDocker) {
+    refs.cmd.textContent = `container: ${service.container}`;
+    refs.cmd.title = refs.cmd.textContent;
+    refs.runtimeTag.textContent = runtime.image || 'docker';
+    refs.runtimeTag.title = runtime.image || '';
+    refs.pidLabel.textContent = 'Estado';
+    refs.pidValue.textContent = runtime.containerState || '--';
+    const published = (runtime.ports || [])
+      .filter((p) => p.published)
+      .map((p) => p.published)
+      .join(', ');
+    refs.portValue.textContent = published || '--';
+  } else {
+    const parts = [service.command, ...(service.args || [])].filter(Boolean);
+    refs.cmd.textContent = parts.length ? parts.join(' ') : '(somente monitorar)';
+    refs.cmd.title = refs.cmd.textContent;
+    refs.runtimeTag.textContent = runtime.nodeVersion || (service.nodePath ? 'node?' : '');
+    refs.runtimeTag.title = service.nodePath || '';
+    refs.pidLabel.textContent = 'PID';
+    refs.pidValue.textContent = runtime.pid ?? '--';
+    refs.portValue.textContent = service.health?.port ? service.health.port : '--';
+  }
 
   // Metricas so fazem sentido com o processo em execucao.
   const live = ['running', 'starting'].includes(status);
@@ -144,15 +170,27 @@ function paintCard(service) {
 
   const health = runtime.health || 'unknown';
   refs.healthDot.className = `health-dot ${health}`;
-  refs.healthText.textContent = service.health?.type === 'none'
-    ? 'sem verificacao'
-    : `${HEALTH_LABELS[health] || health}${runtime.healthDetail?.latencyMs ? ` (${runtime.healthDetail.latencyMs}ms)` : ''}`;
+  refs.healthText.textContent = isDocker
+    ? `${HEALTH_LABELS[health] || health}`
+    : service.health?.type === 'none'
+      ? 'sem verificacao'
+      : `${HEALTH_LABELS[health] || health}${runtime.healthDetail?.latencyMs ? ` (${runtime.healthDetail.latencyMs}ms)` : ''}`;
+
+  // Servico somente monitorar: o painel mostra o estado real, mas nao controla.
+  const readOnly = Boolean(service.monitorOnly);
+  if (readOnly && !isDocker) {
+    const tone = health === 'healthy' ? 'running' : health === 'unhealthy' ? 'crashed' : 'stopped';
+    refs.dot.className = `dot ${tone}`;
+    refs.badge.className = `badge ${tone}`;
+    refs.badge.textContent =
+      health === 'healthy' ? 'Saudavel' : health === 'unhealthy' ? 'Fora do ar' : 'Monitorado';
+  }
 
   const active = ['running', 'starting'].includes(status);
   const busy = ['starting', 'stopping', 'backoff'].includes(status);
-  refs.startBtn.disabled = active || busy;
-  refs.stopBtn.disabled = !active && !busy;
-  refs.restartBtn.disabled = busy;
+  refs.startBtn.disabled = readOnly || active || busy;
+  refs.stopBtn.disabled = readOnly || (!active && !busy);
+  refs.restartBtn.disabled = readOnly || busy;
 
   if (status === 'backoff' && runtime.nextRetryAt) {
     const seconds = Math.max(0, Math.round((runtime.nextRetryAt - Date.now()) / 1000));
@@ -309,9 +347,14 @@ document.getElementById('btn-stop-all').addEventListener('click', () =>
   api.services.stopAll().catch(reportError)
 );
 document.getElementById('btn-discover').addEventListener('click', () =>
-  openDiscovery(api, async (payload) => {
-    await api.services.create(payload);
-  }).catch(reportError)
+  openDiscovery(
+    api,
+    async (payload) => {
+      await api.services.create(payload);
+    },
+    (containerName) =>
+      state.services.some((s) => s.type === 'docker' && s.container === containerName)
+  ).catch(reportError)
 );
 
 /* ------------------------------------------------------------------ */
