@@ -10,15 +10,16 @@
       "id": "demo-api",
       "name": "API Demonstração",
       "group": "Exemplos",
+      "type": "processo",
       "command": "node",
       "args": ["examples/api-demo.js"],
       "cwd": "",
-      "env": {
-        "PORT": "45999"
-      },
+      "env": { "PORT": "45999" },
       "shell": false,
       "autostart": false,
       "monitorOnly": false,
+      "nodePath": "",
+      "container": "",
       "health": {
         "type": "http",
         "port": 45999,
@@ -38,6 +39,74 @@
         "stabilityMs": 60000
       },
       "createdAt": "2026-10-20T11:00:00.000Z"
+    },
+    {
+      "id": "servico-node-legado",
+      "name": "Serviço com Node 18 (versão própria)",
+      "group": "Exemplos",
+      "type": "processo",
+      "command": "npm",
+      "args": ["run", "dev"],
+      "cwd": "",
+      "env": {},
+      "shell": false,
+      "autostart": false,
+      "monitorOnly": false,
+      "nodePath": "C:\\Users\\ferna\\AppData\\Local\\nvm\\v18.20.8\\node.exe",
+      "container": "",
+      "health": {
+        "type": "tcp",
+        "port": 3000,
+        "path": "/",
+        "expectStatus": 200,
+        "intervalMs": 5000,
+        "timeoutMs": 3000,
+        "graceMs": 10000,
+        "failuresBeforeUnhealthy": 3
+      },
+      "restart": {
+        "enabled": true,
+        "maxRetries": 5,
+        "backoffMs": 1000,
+        "maxBackoffMs": 30000,
+        "restartOnUnhealthy": true,
+        "stabilityMs": 60000
+      },
+      "createdAt": "2026-10-20T11:30:00.000Z"
+    },
+    {
+      "id": "container-exemplo",
+      "name": "Container de exemplo",
+      "group": "Docker",
+      "type": "docker",
+      "command": "",
+      "args": [],
+      "cwd": "",
+      "env": {},
+      "shell": false,
+      "autostart": false,
+      "monitorOnly": false,
+      "nodePath": "",
+      "container": "gameshelfproject-api-1",
+      "health": {
+        "type": "none",
+        "port": null,
+        "path": "/",
+        "expectStatus": 200,
+        "intervalMs": 5000,
+        "timeoutMs": 3000,
+        "graceMs": 0,
+        "failuresBeforeUnhealthy": 3
+      },
+      "restart": {
+        "enabled": true,
+        "maxRetries": 3,
+        "backoffMs": 1000,
+        "maxBackoffMs": 30000,
+        "restartOnUnhealthy": false,
+        "stabilityMs": 60000
+      },
+      "createdAt": "2026-10-20T12:00:00.000Z"
     }
   ]
 }
