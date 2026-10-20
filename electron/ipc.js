@@ -49,6 +49,7 @@ function registerIpc({
   hideWindow,
   isAutoStartEnabled,
   setAutoStart,
+  paths,
 }) {
   const handle = (channel, fn) => {
     ipcMain.handle(channel, async (_event, ...args) => {
@@ -108,6 +109,8 @@ function registerIpc({
     hideWindow?.();
     return true;
   });
+
+  handle('app:info', () => paths);
 
   handle('app:relaunch-elevated', () => {
     const args = process.argv.slice(1).map((arg) => `'${arg.replace(/'/g, "''")}'`).join(',');

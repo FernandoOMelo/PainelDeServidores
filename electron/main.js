@@ -1,10 +1,8 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, protocol, net, shell, Menu, Tray, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Menu, Tray, nativeImage } = require('electron');
 const path = require('node:path');
-const fs = require('node:fs');
 const { execFile } = require('node:child_process');
-const { pathToFileURL } = require('node:url');
 
 const { Store } = require('./store');
 const { ServiceManager } = require('./service-manager');
@@ -14,35 +12,22 @@ const { listListeningPorts, isPortOpen } = require('./discovery');
 const APP_ROOT = path.resolve(__dirname, '..');
 const IS_DEV = !app.isPackaged;
 
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: 'app',
-    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true },
-  },
-]);
+/**
+ * Onde ficam os logs e a configuracao.
+ *
+ * Em desenvolvimento fica dentro do projeto. Quando empacotado, a pasta do
+ * app e somente leitura (dentro do asar), entao tudo vai para a pasta de
+ * dados do usuario.
+ */
+const USER_DATA = app.getPath('userData');
+const LOG_DIR = IS_DEV ? path.join(APP_ROOT, 'logs') : path.join(USER_DATA, 'logs');
+const CONFIG_PATH = IS_DEV ? path.join(APP_ROOT, 'config.local.json') : path.join(USER_DATA, 'config.json');
 
 let mainWindow = null;
 let manager = null;
 let store = null;
 let tray = null;
 let isQuitting = false;
-
-/** Serve os arquivos do renderer via app:// sem depender de file:// (habilita ES modules). */
-function registerProtocol() {
-  protocol.handle('app', async (request) => {
-    const url = new URL(request.url);
-    const relPath = decodeURIComponent(url.pathname).replace(/^\/+/, '');
-    const filePath = path.join(APP_ROOT, relPath);
-
-    if (!filePath.startsWith(APP_ROOT)) {
-      return new Response('Acesso negado', { status: 403 });
-    }
-    if (!fs.existsSync(filePath)) {
-      return new Response('Nao encontrado', { status: 404 });
-    }
-    return net.fetch(pathToFileURL(filePath).toString());
-  });
-}
 
 /* ------------------------------------------------------------------ */
 /* Janela                                                              */
@@ -80,7 +65,10 @@ function createWindow({ show = true } = {}) {
   });
 
   Menu.setApplicationMenu(null);
-  mainWindow.loadURL('app://bundle/src/index.html');
+  // Carregado direto do disco: um esquema customizado (app://) faria o
+  // Electron criar um processo "Tab" extra, gastando ~50 MB mesmo sem
+  // janela aberta. O Electron permite ES modules via file://.
+  mainWindow.loadFile(path.join(APP_ROOT, 'src', 'index.html'));
 
   mainWindow.once('ready-to-show', () => {
     if (show) mainWindow.show();
@@ -280,14 +268,9 @@ function setAutoStart(enabled) {
 
 app.disableHardwareAcceleration();
 app.whenReady().then(() => {
-  const configPath = app.isPackaged
-    ? path.join(app.getPath('userData'), 'config.json')
-    : path.join(APP_ROOT, 'config.local.json');
+  store = new Store(CONFIG_PATH);
+  manager = new ServiceManager(store, { logDir: LOG_DIR, appRoot: APP_ROOT });
 
-  store = new Store(configPath);
-  manager = new ServiceManager(store, { logDir: path.join(APP_ROOT, 'logs'), appRoot: APP_ROOT });
-
-  registerProtocol();
   registerIpc({
     manager,
     store,
@@ -297,6 +280,7 @@ app.whenReady().then(() => {
     hideWindow: hideToTray,
     isAutoStartEnabled,
     setAutoStart,
+    paths: { config: CONFIG_PATH, logs: LOG_DIR, userData: USER_DATA },
   });
 
   manager.on('state', (snapshot) => {
@@ -321,9 +305,10 @@ app.whenReady().then(() => {
     refreshTrayMenu();
   });
 
-  // --hidden: subir direto na bandeja, sem abrir a janela.
+  // --hidden: subir direto na bandeja, sem criar a janela. Sem isso o
+  // renderer ficaria aberto (~120 MB) sem ninguem vendo.
   const startedHidden = process.argv.includes('--hidden');
-  createWindow({ show: !startedHidden });
+  if (!startedHidden) createWindow({ show: true });
 
   app.on('activate', () => showWindow());
 });

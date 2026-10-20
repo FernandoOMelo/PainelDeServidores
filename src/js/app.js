@@ -492,6 +492,19 @@ async function renderAppMenu() {
       text: 'Fechar a janela envia o painel para a bandeja: ele continua monitorando os serviços em segundo plano.',
     })
   );
+
+  try {
+    const info = await api.app.info();
+    appMenu.append(
+      el('div', { class: 'menu-sep' }),
+      el('div', { class: 'menu-note' }, [
+        el('div', { text: 'Configuracao:' }),
+        el('div', { class: 'menu-path', text: info.config, title: info.config }),
+      ])
+    );
+  } catch {
+    /* caminho nao disponivel */
+  }
 }
 
 function menuItem(label, checked, onClick) {

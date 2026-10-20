@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('api', {
     hideWindow: () => invoke('app:hide-window'),
     autoStart: () => invoke('app:auto-start'),
     setAutoStart: (enabled) => invoke('app:set-auto-start', enabled),
+    info: () => invoke('app:info'),
   },
   node: {
     version: (nodePath) => invoke('node:version', nodePath),

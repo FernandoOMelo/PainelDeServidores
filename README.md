@@ -54,6 +54,24 @@ npm install
 npm start
 ```
 
+## Gerar o executavel
+
+```bash
+npm run build       # pasta: dist\win-unpacked\Painel de Servidores.exe
+npm run build:exe   # arquivo unico: dist\PainelDeServidores.exe
+```
+
+- **`build:exe`** gera um `.exe` unico de ~95 MB que extrai sozinho para
+  `%TEMP%` e roda. Conveniente para levar a qualquer lugar, mas a primeira
+  execucao demora um pouco mais (extracao) e o start e mais lento.
+- **`build`** gera uma pasta com o executavel e os recursos. Abre
+  instantaneamente e e o melhor para uso diario - da para fixar o `.exe` na
+  barra de tarefas.
+
+Em ambos, a configuracao e os logs ficam em
+`%APPDATA%\painel-servidores\` (o caminho aparece no menu de opcoes do app),
+e nao junto do executavel.
+
 ## Testes
 
 ```bash

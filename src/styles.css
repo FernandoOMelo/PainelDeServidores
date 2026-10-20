@@ -603,6 +603,14 @@ body {
   line-height: 1.45;
 }
 
+.menu-path {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  word-break: break-all;
+  margin-top: 2px;
+}
+
 /* ---------- Stats clicaveis (filtro por status) ---------- */
 
 .stat {
