@@ -3,9 +3,12 @@
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { ServiceRunner, STATES } = require('./service-runner');
+const { DockerRunner } = require('./docker-runner');
+const { DockerClient } = require('./docker');
 const { HealthMonitor } = require('./health-checker');
 const { MetricsCollector } = require('./metrics');
 const { normalizeService } = require('./store');
+const { detectNodeVersion, resolveNodeExecutable } = require('./executables');
 
 /**
  * Orquestrador: mantem os servicos registrados, Their runners, monitores
@@ -17,8 +20,9 @@ class ServiceManager extends EventEmitter {
     this.store = store;
     this.appRoot = options.appRoot || process.cwd();
     this.logDir = options.logDir || path.join(this.appRoot, 'logs');
-    this.runners = new Map(); // id -> ServiceRunner
+    this.runners = new Map(); // id -> ServiceRunner | DockerRunner
     this.monitors = new Map(); // id -> HealthMonitor
+    this.docker = new DockerClient({ binary: options.dockerBinary });
     this.metrics = new MetricsCollector({
       intervalMs: store.getSetting('metricsIntervalMs', 2000),
       dir: options.tempDir,
@@ -41,28 +45,41 @@ class ServiceManager extends EventEmitter {
     this.#syncPids();
 
     for (const service of this.services) {
-      if (service.autostart && !service.monitorOnly) this.start(service.id);
+      if (service.monitorOnly) this.observe(service.id);
+      else if (service.autostart) this.start(service.id);
     }
 
     this.emit('services-changed', this.list());
+
+    // Containers so podem ser monitorados se o daemon estiver de pe.
+    if (this.services.some((s) => s.type === 'docker')) {
+      this.docker.availability().then((status) => {
+        if (!status.ok) {
+          this.emit('notice', {
+            level: 'error',
+            title: 'Docker indisponivel',
+            message: status.error,
+          });
+        }
+      });
+    }
   }
 
   #attach(service) {
-    const runner = new ServiceRunner(service, {
-      maxLogs: this.store.getSetting('logBufferLines', 2000),
-      logDir: this.logDir,
-      appRoot: this.appRoot,
-    });
-    runner.setOptions({
-      maxLogs: this.store.getSetting('logBufferLines', 2000),
-      logDir: this.logDir,
-      appRoot: this.appRoot,
-    });
+    const maxLogs = this.store.getSetting('logBufferLines', 2000);
+    const runner =
+      service.type === 'docker'
+        ? new DockerRunner(service, { docker: this.docker, maxLogs, logDir: this.logDir })
+        : new ServiceRunner(service, { maxLogs, logDir: this.logDir, appRoot: this.appRoot });
+
+    runner.setOptions?.({ maxLogs, logDir: this.logDir, appRoot: this.appRoot });
 
     runner.on('state', (snapshot) => this.#onState(service.id, snapshot));
     runner.on('log', (entries) => {
       if (entries.length) this.emit('log', { id: service.id, entries });
     });
+    runner.on('metrics', (payload) => this.emit('metrics', payload));
+    runner.on('health', (payload) => this.emit('health', { id: service.id, ...payload }));
     runner.on('restart-exhausted', ({ reason }) => {
       this.emit('notice', {
         level: 'error',
@@ -71,35 +88,52 @@ class ServiceManager extends EventEmitter {
       });
     });
 
-    const monitor = new HealthMonitor(service);
-    monitor.on('result', (result) => {
-      this.emit('health', { id: service.id, ...result });
-    });
-    monitor.on('unhealthy', (result) => {
-      this.emit('notice', {
-        level: 'error',
-        title: service.name,
-        message: `Health check falhou: ${result.error || 'sem resposta'}`,
+    // Containers tem health proprio (HEALTHCHECK do docker); o monitor TCP/HTTP
+    // so se aplica a servicos de processo.
+    let monitor = null;
+    if (service.type !== 'docker') {
+      monitor = new HealthMonitor(service);
+      monitor.on('result', (result) => {
+        this.emit('health', { id: service.id, ...result });
       });
-      const runnerRef = this.runners.get(service.id);
-      const cfg = service.restart || {};
-      if (cfg.restartOnUnhealthy && runnerRef && runnerRef.isActive) {
-        runnerRef.restartCount = 0;
-        runnerRef.restart();
-      }
-    });
-    monitor.on('recovered', () => {
-      this.emit('notice', { level: 'success', title: service.name, message: 'Health check recuperado.' });
-    });
+      monitor.on('unhealthy', (result) => {
+        this.emit('notice', {
+          level: 'error',
+          title: service.name,
+          message: `Health check falhou: ${result.error || 'sem resposta'}`,
+        });
+        const runnerRef = this.runners.get(service.id);
+        const cfg = service.restart || {};
+        if (cfg.restartOnUnhealthy && runnerRef && runnerRef.isActive) {
+          runnerRef.restartCount = 0;
+          runnerRef.restart();
+        }
+      });
+      monitor.on('recovered', () => {
+        this.emit('notice', { level: 'success', title: service.name, message: 'Health check recuperado.' });
+      });
+    }
 
     this.runners.set(service.id, runner);
-    this.monitors.set(service.id, monitor);
+    if (monitor) this.monitors.set(service.id, monitor);
+
+    // Detecta a versao do node do servico logo no cadastro, para que o painel
+    // mostre qual versao cada servico usa mesmo antes de roda-lo.
+    if (service.type !== 'docker' && service.nodePath) {
+      this.detectNodeVersion(service.nodePath).then((version) => {
+        runner.nodeVersion = version;
+        this.emit('state', runner.snapshot());
+      });
+    }
+
     return runner;
   }
 
   #onState(id, snapshot) {
     const service = this.services.find((s) => s.id === id);
-    if (service?.health?.type !== 'none' && service?.health?.port) {
+    const isDocker = service?.type === 'docker';
+
+    if (!isDocker && service?.health?.type !== 'none' && service?.health?.port) {
       const monitor = this.monitors.get(id);
       if (snapshot.state === STATES.RUNNING) {
         monitor?.start();
@@ -132,10 +166,11 @@ class ServiceManager extends EventEmitter {
     const states = {};
     for (const [id, runner] of this.runners) {
       const monitor = this.monitors.get(id);
+      const snapshot = runner.snapshot();
       states[id] = {
-        ...runner.snapshot(),
-        health: monitor?.state ?? 'unknown',
-        healthDetail: monitor?.lastResult ?? null,
+        ...snapshot,
+        health: snapshot.health ?? monitor?.state ?? 'unknown',
+        healthDetail: snapshot.healthDetail ?? monitor?.lastResult ?? null,
       };
     }
     return states;
@@ -154,6 +189,9 @@ class ServiceManager extends EventEmitter {
 
   create(input) {
     const service = normalizeService(input);
+    if (service.type === 'docker' && !service.container) {
+      throw new Error('Informe o nome do container Docker.');
+    }
     this.store.setServices([...this.services, service]);
     this.#attach(service);
     this.emit('services-changed', this.list());
@@ -166,6 +204,9 @@ class ServiceManager extends EventEmitter {
 
     const current = this.services[index];
     const service = normalizeService({ ...current, ...input, id });
+    if (service.type === 'docker' && !service.container) {
+      throw new Error('Informe o nome do container Docker.');
+    }
 
     this.store.setServices(this.services.map((s, i) => (i === index ? service : s)));
 
@@ -202,22 +243,47 @@ class ServiceManager extends EventEmitter {
   }
 
   start(id) {
+    const service = this.getService(id);
     const runner = this.runners.get(id);
     if (!runner) return;
+    if (service?.monitorOnly) return;
     if (runner.isActive) return;
     runner.start();
   }
 
   async stop(id) {
+    const service = this.getService(id);
     const runner = this.runners.get(id);
     if (!runner) return;
+    if (service?.monitorOnly) return;
     await runner.stop();
   }
 
   async restart(id) {
+    const service = this.getService(id);
     const runner = this.runners.get(id);
     if (!runner) return;
+    if (service?.monitorOnly) return;
     await runner.restart();
+  }
+
+  /**
+   * Acompanha um servico sem controla-lo. Para containers, o runner le o
+   * estado real; para processos externos, o acompanhamento fica a cargo do
+   * health check de porta.
+   */
+  observe(id) {
+    const service = this.getService(id);
+    const runner = this.runners.get(id);
+    if (!runner) return;
+
+    runner.observe?.();
+
+    const monitor = this.monitors.get(id);
+    if (monitor && service?.health?.type !== 'none' && service?.health?.port) {
+      monitor.start();
+      monitor.check().catch(() => {});
+    }
   }
 
   startAll() {
@@ -238,6 +304,20 @@ class ServiceManager extends EventEmitter {
 
   clearLogs(id) {
     this.runners.get(id)?.clearLogs();
+  }
+
+  /** Containers disponiveis na maquina, prontos para cadastro. */
+  async listContainers() {
+    const status = await this.docker.availability();
+    if (!status.ok) throw new Error(status.error);
+    return this.docker.listContainers();
+  }
+
+  /** Versao do node em um caminho especifico (null quando invalido). */
+  async detectNodeVersion(nodePath) {
+    const resolved = resolveNodeExecutable(nodePath, this.appRoot);
+    if (!resolved) return null;
+    return detectNodeVersion(resolved);
   }
 
   dispose() {

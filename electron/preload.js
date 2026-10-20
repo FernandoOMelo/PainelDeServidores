@@ -36,6 +36,13 @@ contextBridge.exposeInMainWorld('api', {
   discovery: {
     scan: () => invoke('discovery:scan'),
   },
+  docker: {
+    status: () => invoke('docker:status'),
+    containers: () => invoke('docker:containers'),
+  },
+  node: {
+    version: (nodePath) => invoke('node:version', nodePath),
+  },
   on: {
     state: (cb) => subscribe('svc:state', cb),
     log: (cb) => subscribe('svc:log', cb),

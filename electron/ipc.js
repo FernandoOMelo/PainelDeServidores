@@ -44,9 +44,10 @@ function registerIpc({ manager, store, listListeningPorts, isPortOpen }) {
     return results;
   });
 
-  handle('shell:show-item', (_filePath) => {
-    // Mantido para futuras integracoes com "abrir pasta do servico".
-  });
+  handle('docker:status', () => manager.docker.availability());
+  handle('docker:containers', () => manager.listContainers());
+
+  handle('node:version', (nodePath) => manager.detectNodeVersion(nodePath));
 }
 
 module.exports = { registerIpc };
