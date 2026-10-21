@@ -24,6 +24,9 @@ pub struct AppState {
     pub paths: AppPaths,
     pub app_root: PathBuf,
     pub window: parking_lot::Mutex<Option<tauri::WebviewWindow>>,
+    /// Marcado quando o usuario pede para sair (menu da bandeja). Sem isso,
+    /// o Tauri encerra o app junto com a ultima janela fechada.
+    pub sair_solicitado: std::sync::atomic::AtomicBool,
 }
 
 /* ------------------------------------------------------------------ */

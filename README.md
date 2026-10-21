@@ -43,7 +43,10 @@ Escrito em **Rust (Tauri)** com o frontend em HTML/CSS/JavaScript puro.
 - **Bandeja do sistema** - fechar a janela nao encerra o app: ele continua
   monitorando os servicos em segundo plano, com icone na bandeja. A janela e
   destruida de verdade ao fechar, e a WebView2 so e criada quando o painel e
-  aberto de fato.
+  aberto de fato - sem janela, o app fica com ~26 MB e zero processos de
+  navegador.
+- **Instancia unica** - rodar o executavel de novo nao abre um segundo app:
+  ele avisa o que ja esta na bandeja, mostra a janela e sai.
 - **Inicializacao automatica com o Windows** - o app pode subir junto com o
   sistema, direto na bandeja (sem abrir janela).
 

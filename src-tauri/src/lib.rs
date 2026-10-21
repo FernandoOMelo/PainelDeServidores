@@ -9,6 +9,7 @@ pub mod discovery;
 pub mod docker;
 pub mod executables;
 pub mod health;
+mod instancia;
 mod manager;
 pub mod metrics;
 mod service;
@@ -49,6 +50,19 @@ fn app_root() -> PathBuf {
 }
 
 pub fn run() {
+    // Instancia unica: se ja existe um painel na bandeja, este processo so
+    // avisa e sai - evita dois apps monitorando os mesmos servicos.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime do tokio");
+
+    if runtime
+        .block_on(instancia::avisar_instancia_existente())
+    {
+        return;
+    }
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             commands::servicos_listar,
@@ -113,6 +127,7 @@ pub fn run() {
                 },
                 app_root: root,
                 window: parking_lot::Mutex::new(None),
+                sair_solicitado: std::sync::atomic::AtomicBool::new(false),
             });
 
             // Bandeja: o app continua monitorando com a janela fechada.
@@ -167,7 +182,14 @@ pub fn run() {
                         let enabled = !autostart::is_enabled();
                         autostart::set_enabled(enabled);
                     }
-                    "sair" => app.exit(0),
+                    "sair" => {
+                        if let Some(state) = app.try_state::<AppState>() {
+                            state
+                                .sair_solicitado
+                                .store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        app.exit(0);
+                    }
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
@@ -176,6 +198,14 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            // Instancia unica: se outro processo avisar, mostra a janela.
+            {
+                let handle = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    instancia::escutar(move || abrir_janela(&handle)).await;
+                });
+            }
 
             // Eventos internos -> interface.
             let manager_for_pump = manager.clone();
@@ -211,19 +241,44 @@ pub fn run() {
                 // Fechar a janela envia o app para a bandeja: ele continua
                 // monitorando os servicos em segundo plano.
                 api.prevent_close();
-                let _ = window.hide();
-                if let Some(state) = window.app_handle().try_state::<AppState>() {
+
+                let handle = window.app_handle().clone();
+                if let Some(state) = handle.try_state::<AppState>() {
+                    // A janela e destruida de verdade: esconder deixaria a
+                    // WebView2 viva, com ~350 MB segurados sem ninguem olhando.
+                    *state.window.lock() = None;
+
                     let manager = state.manager.clone();
                     tauri::async_runtime::spawn(async move {
                         manager.set_window_active(false).await;
                     });
                 }
+
+                // Destruicao sincrona: o rotulo "main" precisa estar livre
+                // quando o usuario pedir a janela de novo pela bandeja.
+                let _ = window.destroy();
             }
         })
         .build(tauri::generate_context!())
         .expect("falha ao iniciar o app")
         .run(|app, event| {
-            if let RunEvent::ExitRequested { .. } = event {
+            if let RunEvent::ExitRequested { api, .. } = event {
+                // Fechar a janela nao encerra o app: ele continua na bandeja
+                // monitorando os servicos. So sai quando o usuario pede.
+                let pedido = app
+                    .try_state::<AppState>()
+                    .map(|state| {
+                        state
+                            .sair_solicitado
+                            .load(std::sync::atomic::Ordering::Relaxed)
+                    })
+                    .unwrap_or(true);
+
+                if !pedido {
+                    api.prevent_exit();
+                    return;
+                }
+
                 // Encerra os processos que o painel iniciou.
                 if let Some(state) = app.try_state::<AppState>() {
                     let manager = state.manager.clone();
