@@ -109,18 +109,44 @@ impl Manager {
         self.runners.lock().remove(id);
     }
 
+    /// Detecta a versao do node de um servico, para o painel mostrar qual
+    /// versao cada um usa mesmo antes de roda-lo.
+    pub fn detect_node_version(&self, node_path: &str) -> Option<String> {
+        let resolved = crate::executables::resolve_node_executable(node_path, &self.app_root)?;
+        crate::executables::detect_node_version(&resolved)
+    }
+
     /// Cria (ou recria) o runner de um servico.
     async fn attach(&self, service: Service) {
+        // Versao do node proprio: detectada no cadastro, para o card mostrar
+        // qual versao o servico usa mesmo parado.
+        let node_path = service.node_path.clone();
+        let node_version = if node_path.trim().is_empty() {
+            None
+        } else {
+            self.detect_node_version(&node_path)
+        };
+
         let logs = Arc::new(Mutex::new(LogBuffer {
             entries: Default::default(),
             seq: 0,
             limit: self.log_limit,
         }));
         let runner = Runner::new(service, self.app_root.clone(), logs, self.tx.clone());
+        let mut runner = runner;
+        if let Some(version) = node_version {
+            runner.node_version = Some(version);
+        }
 
         let runner = Arc::new(AsyncMutex::new(runner));
         let service_id = runner.lock().await.service.id.clone();
         self.runners.lock().insert(service_id, runner.clone());
+
+        // Publica o estado logo apos cadastrar: e o que leva a versao do node
+        // (e o resto do runtime) ate a interface, que senao ficaria com o
+        // card sem informacao ate o proximo start.
+        let snapshot = runner.lock().await.snapshot();
+        let _ = self.tx.send(AppEvent::State(snapshot));
     }
 
     fn runner(&self, id: &str) -> Option<Arc<AsyncMutex<Runner>>> {

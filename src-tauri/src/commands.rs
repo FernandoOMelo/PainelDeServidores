@@ -53,9 +53,12 @@ pub async fn servicos_listar(state: State<'_, AppState>) -> Result<Vec<ServiceWi
 }
 
 #[tauri::command]
-pub async fn servicos_estado(state: State<'_, AppState>) -> Result<Vec<Runtime>, String> {
-    let runtimes = state.manager.state().await;
-    Ok(runtimes.into_values().collect())
+pub async fn servicos_estado(
+    state: State<'_, AppState>,
+) -> Result<std::collections::HashMap<String, Runtime>, String> {
+    // O frontend indexa o runtime pelo id do servico, entao a resposta e um
+    // mapa e nao uma lista.
+    Ok(state.manager.state().await)
 }
 
 #[tauri::command]
